@@ -22,9 +22,9 @@ if str(SCRIPT_DIR) not in sys.path:
 
 # Intentar importar librerías críticas para el análisis y dependencias del importador
 try:
-    import cv2
-    import numpy as np
-    from PIL import Image
+    import cv2  # noqa: F401
+    import numpy as np  # noqa: F401
+    from PIL import Image  # noqa: F401
 
     from src.deck_importer import DeckImportError, fetch_deck
     from src.quality import analyze_single_image
