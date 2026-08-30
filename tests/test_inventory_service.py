@@ -1,6 +1,7 @@
 """Tests for InventoryService business logic and proxy planning."""
 
 from pathlib import Path
+
 import pytest
 
 from src.inventory.models import DeckCardEntry, DeckRecord, InventoryCard

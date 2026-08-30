@@ -13,7 +13,6 @@ import time
 import tkinter as tk
 import traceback
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox, ttk
@@ -45,7 +44,6 @@ from gui.xml_tab import XmlTabMixin
 from src.app_settings import AppSettings, load_settings
 from src.cancellation import Cancelled
 from src.constants import CARDS_PER_PAGE, Stage
-from src.deck_importer import DeckCard
 from src.downloader import (
     DownloadPartialError,
     DownloadPermissionError,
@@ -119,7 +117,7 @@ class GeneratorView(
         self._cut_line_skip_date: str | None = None
 
         self.events: queue.Queue = queue.Queue()
-        self.worker: threading.Thread | Any = None
+        self.worker: threading.Thread | None = None
         self.cancel_event = threading.Event()
         self.running = False
         self.keep_cache = tk.BooleanVar(value=False)
@@ -140,8 +138,6 @@ class GeneratorView(
         self.after(200, self._setup_dnd)
 
     def _build_ui(self) -> None:
-        pad = {"padx": 10, "pady": 6}
-
         bottom_controls = ttk.Frame(self)
         bottom_controls.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0), padx=10)
 
@@ -1500,25 +1496,41 @@ class GeneratorView(
         stats_val_names = ["/System/Library/Fonts/Supplemental/Georgia.ttf", "Georgia", "Arial"]
         
         for f_name in title_font_names:
-            try: font_title = ImageFont.truetype(f_name, title_size); break
-            except OSError: continue
-        if font_title is None: font_title = ImageFont.load_default()
-            
+            try:
+                font_title = ImageFont.truetype(f_name, title_size)
+                break
+            except OSError:
+                continue
+        if font_title is None:
+            font_title = ImageFont.load_default()
+
         for f_name in sub_font_names:
-            try: font_sub = ImageFont.truetype(f_name, sub_size); break
-            except OSError: continue
-        if font_sub is None: font_sub = ImageFont.load_default()
+            try:
+                font_sub = ImageFont.truetype(f_name, sub_size)
+                break
+            except OSError:
+                continue
+        if font_sub is None:
+            font_sub = ImageFont.load_default()
             
         for f_name in stats_header_names:
-            try: font_stats_header = ImageFont.truetype(f_name, stats_header_size); break
-            except OSError: continue
-        if font_stats_header is None: font_stats_header = ImageFont.load_default()
-            
+            try:
+                font_stats_header = ImageFont.truetype(f_name, stats_header_size)
+                break
+            except OSError:
+                continue
+        if font_stats_header is None:
+            font_stats_header = ImageFont.load_default()
+
         for f_name in stats_val_names:
-            try: font_stats_val = ImageFont.truetype(f_name, stats_val_size); break
-            except OSError: continue
-        if font_stats_val is None: font_stats_val = ImageFont.load_default()
-            
+            try:
+                font_stats_val = ImageFont.truetype(f_name, stats_val_size)
+                break
+            except OSError:
+                continue
+        if font_stats_val is None:
+            font_stats_val = ImageFont.load_default()
+
         title_text = deck_name.upper()
         max_title_w = (x1 - x0) - 40
         while title_size > 14:
@@ -1534,8 +1546,11 @@ class GeneratorView(
                 break
             title_size -= 2
             for f_name in title_font_names:
-                try: font_title = ImageFont.truetype(f_name, title_size); break
-                except OSError: continue
+                try:
+                    font_title = ImageFont.truetype(f_name, title_size)
+                    break
+                except OSError:
+                    continue
                 
         try:
             bbox_t = draw.textbbox((0, 0), title_text, font=font_title)

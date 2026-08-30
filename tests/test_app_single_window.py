@@ -1,6 +1,7 @@
 """Unit and integration tests for the single-window gui/app.py application container."""
 
 import tkinter as tk
+
 import pytest
 
 from gui.app import App

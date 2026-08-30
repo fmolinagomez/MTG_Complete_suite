@@ -5,6 +5,7 @@ automatically when no display is available (e.g. headless CI).
 """
 
 import tkinter as tk
+from pathlib import Path
 
 import pytest
 
@@ -356,7 +357,6 @@ class TestGuiHandleDoneWithWarnings:
 
 class TestScrollableRowsHorizontalScrollbar:
     def test_scrollable_rows_has_horizontal_scrollbar(self, app):
-        from tkinter import ttk
         parent = tk.Frame(app.root)
         parent.pack()
         canvas, inner, window_id = app._build_scrollable_rows(parent)
@@ -407,8 +407,9 @@ class TestScrollableRowsHorizontalScrollbar:
 
 class TestSeparatorBackResolution:
     def test_separator_back_always_uses_deck_back_or_default(self, app, tmp_path):
-        from unittest.mock import patch, MagicMock
         from pathlib import Path
+        from unittest.mock import patch
+
         from gui.main import MtgUrlDeck
         from src.deck_importer import DeckCard
 
@@ -461,9 +462,9 @@ class TestSeparatorBackResolution:
         # Mock dependencies
         with (
             patch("gui.main.work_dir", return_value=tmp_path),
-            patch("gui.main.scryfall_download", return_value=dl_results) as mock_dl,
+            patch("gui.main.scryfall_download", return_value=dl_results),
             patch.object(app, "_create_separator_image") as mock_create_sep,
-            patch("gui.main.run_locals_only", side_effect=mock_run_locals_only) as mock_run,
+            patch("gui.main.run_locals_only", side_effect=mock_run_locals_only),
             patch("gui.main.resources_dir", return_value=tmp_path)
         ):
             # Create a mock mtg default back file
@@ -493,8 +494,9 @@ class TestSeparatorBackResolution:
         assert extra_backs[0] == custom_back
 
     def test_separator_back_falls_back_to_default_mtg_back(self, app, tmp_path):
-        from unittest.mock import patch, MagicMock
         from pathlib import Path
+        from unittest.mock import patch
+
         from gui.main import MtgUrlDeck
         from src.deck_importer import DeckCard
 
@@ -541,9 +543,9 @@ class TestSeparatorBackResolution:
         # Mock dependencies
         with (
             patch("gui.main.work_dir", return_value=tmp_path),
-            patch("gui.main.scryfall_download", return_value=dl_results) as mock_dl,
+            patch("gui.main.scryfall_download", return_value=dl_results),
             patch.object(app, "_create_separator_image") as mock_create_sep,
-            patch("gui.main.run_locals_only", side_effect=mock_run_locals_only) as mock_run,
+            patch("gui.main.run_locals_only", side_effect=mock_run_locals_only),
             patch("gui.main.resources_dir", return_value=tmp_path)
         ):
             # Create a mock mtg default back file
@@ -573,6 +575,7 @@ class TestSeparatorBackResolution:
 
     def test_base_name_uses_sanitized_deck_name_when_single_deck(self, app, tmp_path):
         from unittest.mock import patch
+
         from gui.main import MtgUrlDeck
         from src.deck_importer import DeckCard
 

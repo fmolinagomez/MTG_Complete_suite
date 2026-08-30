@@ -285,7 +285,7 @@ class TestFetchCardLanguageAndQuality:
                 "png": "https://cards.scryfall.io/png/front/0/0/abc.png",
             }
         }
-        with patch("src.scryfall._throttled_get", return_value=_mock_resp(json_data)) as mock_get:
+        with patch("src.scryfall._throttled_get", return_value=_mock_resp(json_data)):
             card = fetch_card("ltr", "152", quality="png")
         assert card.front_url == "https://cards.scryfall.io/png/front/0/0/abc.png"
 
@@ -372,7 +372,7 @@ class TestFetchCardLanguageAndQuality:
             else:
                 return _mock_resp(en_json)
 
-        with patch("src.scryfall._throttled_get", side_effect=side_effect) as mock_get:
+        with patch("src.scryfall._throttled_get", side_effect=side_effect):
             card = fetch_card("ltr", "152", lang="es", fail_policy="alternative")
 
         assert card.front_url == "https://cards.scryfall.io/large/front/0/0/en.jpg"

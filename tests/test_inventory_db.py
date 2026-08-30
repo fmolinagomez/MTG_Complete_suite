@@ -1,7 +1,7 @@
 """Tests for SQLite database initialization, configuration, and constraints."""
 
 from pathlib import Path
-import sqlite3
+
 import pytest
 
 from src.inventory.db import get_db, get_db_connection, init_db

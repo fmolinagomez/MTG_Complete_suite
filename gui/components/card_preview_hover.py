@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import logging
 import re
+import tkinter as tk
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-import tkinter as tk
 from tkinter import ttk
 
 from PIL import Image, ImageDraw, ImageTk

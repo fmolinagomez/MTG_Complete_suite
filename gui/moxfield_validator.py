@@ -13,9 +13,8 @@ from gui.views import validator_view
 from gui.views.validator_view import (
     CardValidationResult,
     ValidatorView,
-    create_placeholder_image,
 )
-from src.deck_importer import DeckCard, DeckImportError, fetch_deck
+from src.deck_importer import DeckCard
 from src.scryfall import _fetch_raw_card_data, fetch_card_by_name
 
 _log = logging.getLogger(__name__)
@@ -158,7 +157,7 @@ def main() -> None:
     )
 
     root = tk.Tk()
-    app = ValidatorApp(root)
+    ValidatorApp(root)
     root.mainloop()
 
 

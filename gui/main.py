@@ -1094,7 +1094,6 @@ class App(XmlTabMixin, OPTabMixin, RBTabMixin, LorcanaTabMixin, LocalsTabMixin, 
                     
                     if _deck.include_separator:
                         # Insert separator card at the beginning of each deck
-                        commander = item["commander"]
                         sep_front_path = scryfall_dir / f"separator_{idx}.jpg"
                         sep_back_path = mtg_default_back
                         
@@ -1551,25 +1550,41 @@ class App(XmlTabMixin, OPTabMixin, RBTabMixin, LorcanaTabMixin, LocalsTabMixin, 
         stats_val_names = ["/System/Library/Fonts/Supplemental/Georgia.ttf", "Georgia", "Arial"]
         
         for f_name in title_font_names:
-            try: font_title = ImageFont.truetype(f_name, title_size); break
-            except OSError: continue
-        if font_title is None: font_title = ImageFont.load_default()
-            
+            try:
+                font_title = ImageFont.truetype(f_name, title_size)
+                break
+            except OSError:
+                continue
+        if font_title is None:
+            font_title = ImageFont.load_default()
+
         for f_name in sub_font_names:
-            try: font_sub = ImageFont.truetype(f_name, sub_size); break
-            except OSError: continue
-        if font_sub is None: font_sub = ImageFont.load_default()
-            
+            try:
+                font_sub = ImageFont.truetype(f_name, sub_size)
+                break
+            except OSError:
+                continue
+        if font_sub is None:
+            font_sub = ImageFont.load_default()
+
         for f_name in stats_header_names:
-            try: font_stats_header = ImageFont.truetype(f_name, stats_header_size); break
-            except OSError: continue
-        if font_stats_header is None: font_stats_header = ImageFont.load_default()
-            
+            try:
+                font_stats_header = ImageFont.truetype(f_name, stats_header_size)
+                break
+            except OSError:
+                continue
+        if font_stats_header is None:
+            font_stats_header = ImageFont.load_default()
+
         for f_name in stats_val_names:
-            try: font_stats_val = ImageFont.truetype(f_name, stats_val_size); break
-            except OSError: continue
-        if font_stats_val is None: font_stats_val = ImageFont.load_default()
-            
+            try:
+                font_stats_val = ImageFont.truetype(f_name, stats_val_size)
+                break
+            except OSError:
+                continue
+        if font_stats_val is None:
+            font_stats_val = ImageFont.load_default()
+
         # Draw Title (Deck Name)
         title_text = deck_name.upper()
         max_title_w = (x1 - x0) - 40
@@ -1586,8 +1601,11 @@ class App(XmlTabMixin, OPTabMixin, RBTabMixin, LorcanaTabMixin, LocalsTabMixin, 
                 break
             title_size -= 2
             for f_name in title_font_names:
-                try: font_title = ImageFont.truetype(f_name, title_size); break
-                except OSError: continue
+                try:
+                    font_title = ImageFont.truetype(f_name, title_size)
+                    break
+                except OSError:
+                    continue
                 
         try:
             bbox_t = draw.textbbox((0, 0), title_text, font=font_title)

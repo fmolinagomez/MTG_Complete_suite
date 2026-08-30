@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import logging
 import tkinter as tk
-from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import ttk
 
 from gui.components.nav_bar import NavBar
 from gui.paths import app_base_dir, db_path, output_dir, work_dir

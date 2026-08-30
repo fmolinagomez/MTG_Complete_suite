@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import tkinter as tk
-from pathlib import Path
-from tkinter import ttk
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -24,7 +21,6 @@ from src.app_settings import (
 )
 from src.inventory.models import DeckCardEntry, DeckRecord, InventoryCard
 from src.inventory.service import InventoryService
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

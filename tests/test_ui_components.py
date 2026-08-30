@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import tkinter as tk
-from pathlib import Path
 from tkinter import ttk
 from unittest.mock import MagicMock, patch
 
@@ -14,12 +13,10 @@ from gui.components.card_preview_hover import (
     CardHoverPreview,
     CardPreviewInfo,
     create_placeholder_image,
-    get_preview_cache_dir,
     resolve_preview_cache_path,
     sanitize_filename,
 )
 from gui.components.nav_bar import DEFAULT_ROUTES, NavBar
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -261,7 +258,7 @@ class TestCardPreviewHover:
             tree = ttk.Treeview(clean_root, columns=("name", "set"))
             tree.pack()
             item1 = tree.insert("", tk.END, values=("Sol Ring", "LEA"))
-            item2 = tree.insert("", tk.END, values=("Black Lotus", "LEA"))
+            tree.insert("", tk.END, values=("Black Lotus", "LEA"))
 
             resolver = MagicMock(return_value={"name": "Sol Ring", "set_code": "lea", "collector_number": "269"})
             preview.attach_to_treeview(tree, resolver)

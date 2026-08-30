@@ -2,11 +2,11 @@
 
 import io
 from pathlib import Path
+
 import pytest
 
 from src.inventory.db import get_db, init_db
 from src.inventory.manabox_csv import import_parsed_cards, parse_manabox_csv
-from src.inventory.models import InventoryCard
 
 SAMPLE_MANABOX_CSV = """Binder Name,Binder Type,Name,Set code,Set name,Collector number,Foil,Rarity,Quantity,ManaBox ID,Scryfall ID,Purchase price,Misprint,Altered,Condition,Language,Purchase price currency
 Commander Binder,General,Sol Ring,c21,Commander 2021,263,normal,uncommon,2,1001,894b9f29-1941-4545-9854-c917d096c4a8,1.50,false,false,NM,en,USD

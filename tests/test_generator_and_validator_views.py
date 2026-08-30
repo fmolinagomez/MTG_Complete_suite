@@ -2,25 +2,19 @@
 
 from __future__ import annotations
 
-import queue
-import threading
 import tkinter as tk
-from pathlib import Path
 from tkinter import ttk
 from unittest.mock import MagicMock, patch
 
 import pytest
-from PIL import Image
 
 from gui.components.card_preview_hover import CardHoverPreview
 from gui.main import MtgUrlDeck
 from gui.views.generator_view import GeneratorView
 from gui.views.validator_view import CardValidationResult, ValidatorView
-from src.deck_importer import DeckCard, FetchedDeck
+from src.deck_importer import DeckCard
 from src.engine.task_manager import TaskManager
-from src.parser import CardOrder
 from tests.conftest import make_rgb_image
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

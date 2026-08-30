@@ -9,9 +9,8 @@ import threading
 import tkinter as tk
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 from tkinter import messagebox, ttk
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from PIL import Image, ImageDraw, ImageTk
 

@@ -6,7 +6,6 @@ import csv
 import io
 import json
 from pathlib import Path
-import sqlite3
 from typing import Any
 
 from src.inventory.db import get_db
