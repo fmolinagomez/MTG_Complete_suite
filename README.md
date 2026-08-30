@@ -72,40 +72,72 @@ Permite:
 
 ---
 
-## Instalación y Ejecución
+## Instalación y Ejecución con `uv` (Recomendado)
+
+Este proyecto utiliza **[uv](https://docs.astral.sh/uv/)** para la gestión ultrarrápida y reproducible de dependencias, entornos y herramientas.
 
 ### 1. Requisitos previos
-- **Python 3.10 o superior** ([descarga oficial](https://www.python.org/downloads/)).
+- Instalar `uv` (si aún no lo tienes):
+  ```bash
+  # macOS / Linux
+  curl -LsSf https://astral.sh/uv/install.sh | sh
 
-### 2. Entorno virtual e instalación
+  # Windows (PowerShell)
+  powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+  ```
+
+### 2. Sincronizar el entorno y dependencias
+En la raíz del proyecto, ejecuta:
+```bash
+uv sync
+```
+Esto creará automáticamente el entorno virtual (`.venv`) e instalará todas las dependencias necesarias y de desarrollo de forma instantánea.
+
+### 3. Lanzar la aplicación GUI (Suite Completa)
+```bash
+uv run python -m gui.main
+# o mediante el entrypoint registrado:
+uv run mpcfill-gui
+```
+
+### 4. Modo por lotes en línea de comandos (CLI)
+```bash
+uv run python -m cli.main
+# o mediante el entrypoint registrado:
+uv run mpcfill-cli
+```
+Procesa todos los archivos `.xml` ubicados en `xml/` y deposita los PDFs resultantes en `out/`.
+
+### 5. Ejecutar la suite de pruebas y linter
+```bash
+# Tests unitarios y de regresión
+uv run pytest
+
+# Verificación de linter
+uv run ruff check .
+```
+
+### 6. Empaquetar como `.exe` portable (Windows)
+```bash
+uv run python build_exe.py
+```
+Genera `dist/MPCFillToPDF.exe`. El ejecutable es completamente portable: en el directorio donde se ejecute creará automáticamente:
+- `MPCFillToPDF/inventario.db` (Base de datos SQLite de tu colección y mazos).
+- `MPCFillToPDF/archivos generados/` (PDFs listos para imprimir).
+- `MPCFillToPDF/procesamiento/` (Caché de imágenes intermedias y miniaturas).
+
+---
+
+### Instalación tradicional con `pip` (Alternativa)
+Si prefieres no usar `uv`:
 ```bash
 python -m venv .venv
 source .venv/bin/activate    # En Linux / macOS
 .venv\Scripts\activate       # En Windows
 
 pip install -r requirements.txt
-```
-
-### 3. Lanzar la aplicación
-```bash
 python -m gui.main
 ```
-
-### 4. Modo por lotes en línea de comandos (CLI)
-```bash
-python -m cli.main
-```
-Procesa todos los archivos `.xml` ubicados en `xml/` y deposita los PDFs resultantes en `out/`.
-
-### 5. Empaquetar como `.exe` portable (Windows)
-```bash
-pip install pyinstaller
-python build_exe.py
-```
-Genera `dist/MPCFillToPDF.exe`. El ejecutable es completamente portable: en el directorio donde se ejecute creará automáticamente:
-- `MPCFillToPDF/inventario.db` (Base de datos SQLite de tu colección y mazos).
-- `MPCFillToPDF/archivos generados/` (PDFs listos para imprimir).
-- `MPCFillToPDF/procesamiento/` (Caché de imágenes intermedias y miniaturas).
 
 ---
 

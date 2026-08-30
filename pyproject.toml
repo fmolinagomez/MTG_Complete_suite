@@ -1,15 +1,16 @@
 [project]
 name = "mpcfill-topdf"
 version = "0.1.0"
-description = "Automated pipeline that converts an MPCFill XML project file into a print-ready PDF"
+description = "Automated pipeline and desktop suite that converts MPCFill XML and game decks into print-ready PDFs and manages card collections"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "Pillow>=10.0,<12",
     "reportlab>=4.0,<5",
-    "gdown>=5.0,<6",
     "requests>=2.28,<3",
+    "gdown>=5.0,<6",
     "plyer>=2.0,<3",
+    "opencv-python-headless>=4.8.0",
     "windnd>=1.0,<2; sys_platform == 'win32'",
 ]
 
@@ -17,9 +18,19 @@ dependencies = [
 mpcfill-gui = "gui.main:main"
 mpcfill-cli = "cli.main:main"
 
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.9.0",
+    "pyinstaller>=6.0",
+]
+
 [tool.setuptools]
 packages = ["gui", "src", "cli"]
-
 
 [tool.ruff]
 target-version = "py310"
@@ -42,9 +53,4 @@ ignore = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-
-[dependency-groups]
-dev = [
-    "ruff>=0.15.18",
-]
 
