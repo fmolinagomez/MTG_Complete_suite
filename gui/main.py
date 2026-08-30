@@ -2053,13 +2053,15 @@ def _setup_logging() -> None:
 
 def main() -> None:
     _setup_logging()
+    from gui.app import App as ModularApp
+
     root = tk.Tk()
     try:
         ttk.Style().theme_use("vista")
     except tk.TclError:
         pass
-    App(root)
-    root.mainloop()
+    app = ModularApp(root)
+    app.run()
 
 
 if __name__ == "__main__":

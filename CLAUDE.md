@@ -29,43 +29,61 @@ Automated pipeline that converts an MPCFill XML project file into a print-ready 
 ## Tech stack
 
 - **Language**: Python 3.10+
+- **Database**: SQLite3 (`sqlite3` stdlib) with JSON1 capabilities for local inventory persistence
 - **XML parsing**: `xml.etree.ElementTree` (stdlib)
-- **Image download**: `requests` (with Google Drive large-file redirect handling)
-- **Image processing**: `Pillow`
+- **Image download**: `requests` (with Google Drive and Scryfall caching)
+- **Image processing**: `Pillow`, `OpenCV` (focus blur detection)
 - **PDF generation**: `reportlab`
 
 ## Interfaces
 
-The project targets three delivery modes, built in this order:
+The project supports two main execution modes:
 
-1. **CLI** — accepts XML path, outputs PDF path; basis for the other interfaces ✅ v1
-2. **Desktop GUI** — file picker + progress display; for end users on Windows/Mac/Linux ✅ v2 (Tkinter, packaged with PyInstaller)
+1. **CLI** — accepts XML paths and batch-processes `xml/*.xml` into `out/` (unattended batch pipeline).
+2. **Desktop GUI (Modular Single-Window App)** — Tkinter application featuring:
+   - **Persistent Top Navigation Bar**: Seamlessly switch between modules without closing or losing background tasks.
+   - **Splash Hub**: Quick-start dashboard with shortcuts and collection overview metrics.
+   - **PDF Generator View**: MPCFill XML and Direct Game Deck to PDF pipeline with size-based chunking.
+   - **Card Validator View**: Moxfield / Scryfall quality & legality validator with hover previews.
+   - **Card Inventory & Deck Binder View**: ManaBox CSV import (Merge/Replace), collection search, Moxfield missing proxy generator, and live image tooltips.
+   - **Settings View**: Global application configuration.
 
 ## Project structure
 
 ```
 MPCFillToPDF/
 ├── src/
-│   ├── parser.py          # XML parsing → structured card data
-│   ├── downloader.py      # Google Drive image download
-│   ├── cropper.py         # Bleed removal (Pillow)
-│   ├── pdf_generator.py   # PDF layout + chunking (reportlab)
-│   └── pipeline.py        # Orchestrates the full flow
-├── cli/
-│   └── main.py            # CLI: batch-processes xml/*.xml into out/
+│   ├── engine/                # Concurrency & background task orchestration (TaskManager, events)
+│   ├── inventory/             # Card collection & deck binder domain (SQLite, ManaBox CSV, proxy solver)
+│   │   ├── db.py              # SQLite schema, migrations, and connection management
+│   │   ├── models.py          # Data models (InventoryCard, DeckRecord, DeckCardEntry, MissingProxyPlan)
+│   │   ├── manabox_csv.py     # ManaBox CSV parser with Replace and Merge support
+│   │   └── service.py         # Inventory operations, deck sync, missing proxy calculation
+│   ├── parser.py              # XML parsing → structured card data
+│   ├── downloader.py          # Google Drive & Scryfall image download
+│   ├── cropper.py             # Bleed removal (Pillow)
+│   ├── pdf_generator.py       # PDF layout + chunking (reportlab)
+│   ├── pipeline.py            # Orchestrates the full flow
+│   ├── deck_importer.py       # Multi-platform deck parser
+│   ├── scryfall.py            # Scryfall API client & local image caching
+│   └── quality.py             # Focus & resolution quality assessment
 ├── gui/
-│   ├── main.py            # Tkinter GUI entry point
-│   └── paths.py           # Resolves runtime dirs next to the .exe when frozen
-├── build_exe.py           # PyInstaller build script (produces dist/MPCFillToPDF.exe)
-├── xml/                   # Drop .xml inputs here (CLI mode)
-├── MPCFillToPDF/          # Created next to the .exe (or project root in dev); gitignored
-│   ├── archivos generados/  # Generated PDFs
-│   └── procesamiento/       # Download cache, intermediate images, gui.log
-├── examples/
-│   ├── example.xml        # Reference MPCFill project file
-│   ├── example.pdf        # Target PDF output (reference)
-│   └── imgsPdf/           # Screenshots of the reference PDF layout
-└── tests/
+│   ├── main.py                # GUI entry point launching gui.app.App
+│   ├── app.py                 # Single-window container, top nav bar, and frame switcher
+│   ├── paths.py               # Runtime dir resolution (MPCFillToPDF/inventario.db, output, cache)
+│   ├── components/            # Reusable widgets (nav_bar, card_preview_hover, status_bar)
+│   └── views/                 # Modular screens (hub_view, generator_view, validator_view, inventory_view)
+├── cli/
+│   └── main.py                # CLI: batch-processes xml/*.xml into out/
+├── build_exe.py               # PyInstaller build script (produces dist/MPCFillToPDF.exe)
+├── xml/                       # Drop .xml inputs here (CLI mode)
+├── MPCFillToPDF/              # Runtime folder next to .exe or in root; gitignored
+│   ├── inventario.db          # Standalone SQLite collection & deck database
+│   ├── archivos generados/    # Generated PDFs
+│   └── procesamiento/         # Download cache, previews/, intermediate files
+├── docs/                      # Architectural reviews, ADRs, and implementation plans
+│   └── adr/                   # Architecture Decision Records
+└── tests/                     # Unit and integration test suites
 ```
 
 ### CLI usage
@@ -73,16 +91,13 @@ MPCFillToPDF/
 - Output names: `out/<xml_stem>.pdf`, or `out/<xml_stem>_1.pdf`, `out/<xml_stem>_2.pdf`, … when split.
 
 ### GUI usage
-- Run `python -m gui.main` to launch the Tkinter window.
-- The user picks XML(s) via a file dialog, optionally toggles "Conservar caché", and clicks **Generar PDF(s)**.
-- The pipeline runs in a worker thread; UI updates via a `queue.Queue` drained from the Tk loop.
-- When done, the output folder opens automatically (`os.startfile` on Windows).
-- `gui/paths.py` resolves `MPCFillToPDF/archivos generados/` and `MPCFillToPDF/procesamiento/` next to `sys.executable` when frozen by PyInstaller, otherwise next to the project root.
+- Run `python -m gui.main` to launch the single-window desktop application.
+- Top navigation bar allows jumping between **Inicio**, **Generador**, **Validador**, **Inventario** y **Configuración**.
+- Background tasks (like PDF generation or bulk Scryfall fetches) run asynchronously via `TaskManager` while users browse their inventory.
 
 ### Packaging (V2 → .exe)
-- `python build_exe.py` runs PyInstaller with `--onefile --windowed`, bundling `src/assets/` as data.
-- `python build_exe.py --debug-logging` habilita `gui.log` en el exe resultante (por defecto desactivado).
-- Output: `dist/MPCFillToPDF.exe`. The .exe is portable — drop it anywhere and it creates `MPCFillToPDF/archivos generados/` and `MPCFillToPDF/procesamiento/` next to itself on first run.
+- `python build_exe.py` runs PyInstaller with `--onefile --windowed`, bundling `src/assets/` and GUI resources.
+- Output: `dist/MPCFillToPDF.exe`. The .exe is portable — drop it anywhere and it creates `MPCFillToPDF/inventario.db`, `MPCFillToPDF/archivos generados/` and `MPCFillToPDF/procesamiento/` next to itself on first run.
 - `gui/_build_flags.py` is generated by `build_exe.py` at build time and deleted afterwards; it is gitignored and never committed.
 
 ### Size-based splitting

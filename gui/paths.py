@@ -31,3 +31,8 @@ def output_dir() -> Path:
 
 def work_dir() -> Path:
     return _mpc_dir() / "procesamiento"
+
+
+def db_path() -> Path:
+    """Path to the SQLite inventory database file."""
+    return _mpc_dir() / "inventario.db"
