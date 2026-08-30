@@ -5,17 +5,40 @@ Si buscas un tutorial mira aquí -> [https://github.com/Diphendara/MPCFillToPDF/
 Puedes buscarme en twitter/bsky como @diphendara o abrirme una issue por github
 
 
-# MPCFillToPDF
+# MPCFillToPDF Suite
 
-Convierte un archivo de proyecto de [MPCFill](https://mpcfill.com/) (XML) en un PDF listo para imprimir en una imprenta local (A4, 3×3 cartas por página, doble cara).
+Suite integral de herramientas para jugadores y coleccionistas de juegos de cartas coleccionables (Magic: The Gathering, One Piece, Lorcana, Riftbound). 
 
-El XML de MPCFill referencia imágenes alojadas en Google Drive. Esta herramienta las descarga, les quita el sangrado de MPC, las recoloca con un sangrado en espejo de 1 mm y monta el PDF con líneas de corte y marcas de impresora.
+Permite:
+1. **🏠 Splash Hub & Navegación Modular**: Acceso rápido y fluido mediante barra de navegación superior persistente a todos los módulos.
+2. **📄 Generador de PDFs**: Convierte proyectos de [MPCFill](https://mpcfill.com/) (XML) o mazos desde URLs en PDFs optimizados para imprenta (A4, 3×3 cartas por página, doble cara con dorsos espejados y líneas de corte).
+3. **🔍 Validador Técnico**: Audita mazos (Moxfield/Scryfall) comprobando resolución mínima (300 DPI), nitidez (filtro Laplaciano contra imágenes borrosas) y disponibilidad de artes en alta calidad con previsualización flotante instantánea.
+4. **📦 Inventario de Cartas & Gestor de Mazos**: Base de datos SQLite local (`inventario.db`), importación de colecciones desde CSV de **ManaBox** (modos *Merge* o *Replace*), cálculo inteligente de stock físico vs. proxies necesarios para imprimir y visor flotante de imágenes al pasar el ratón.
 
-También soporta mazos de otros juegos de cartas descargándolos directamente desde webs especializadas (ver [Webs soportadas](#webs-soportadas-para-diferentes-tcg)).
+---
+
+## 🚀 Novedades y Módulos
+
+### 1. Inventario de Cartas y Gestor de Mazos (`src/inventory/`)
+- **Base de Datos Local SQLite (`MPCFillToPDF/inventario.db`)**: 100% portable y persistente entre ejecuciones y actualizaciones.
+- **Importador de CSV de ManaBox**:
+  - **Combinar (Merge)**: Actualiza cantidades y versiones de cartas físicas sin alterar tus mazos ni borrar registros previos.
+  - **Sustituir (Replace)**: Reinicia la colección física no asignada cargando el nuevo archivo limpio.
+- **Resolución de Proxies para Mazos de Moxfield**:
+  - Lee cualquier URL de mazo y calcula el stock disponible frente a las copias requeridas.
+  - Genera con un solo clic el PDF exclusivo con **únicamente las cartas que te faltan por imprimir**.
+- **Volcado de Mazo a Inventario**: Permite incorporar todas las cartas de un mazo directamente a tu colección (como cartas físicas o como proxies).
+- **Previsualización Flotante al Pasar el Ratón (Hover Preview)**: Muestra el arte oficial descargado y cacheado en `MPCFillToPDF/procesamiento/previews/` al posicionar el cursor sobre cualquier fila de las tablas.
+
+### 2. Motor de Tareas Asíncrono (`src/engine/`)
+- Permite generar PDFs pesados o importar miles de cartas en segundo plano sin congelar la ventana gráfica, con indicador de estado y progreso en la barra superior.
 
 ---
 
 ## Webs soportadas para diferentes TCG
+
+### Magic: The Gathering
+- **Moxfield, Archidekt, TappedOut, ManaBox**: Pega la URL del mazo para validarlo, importarlo a tu inventario o generar el PDF de proxies faltantes.
 
 ### One Piece Card Game
 
@@ -24,8 +47,6 @@ También soporta mazos de otros juegos de cartas descargándolos directamente de
 | [onepiece.gg](https://onepiece.gg) | `https://onepiece.gg/decks/nombre-del-mazo` |
 | [deckbuilder.egmanevents.com](https://deckbuilder.egmanevents.com) | `https://deckbuilder.egmanevents.com/?deck=CARTA:X,...` o `https://deckbuilder.egmanevents.com/d/CODIGO` |
 | [deckbuilder.cardkaizoku.com](https://deckbuilder.cardkaizoku.com) | `https://deckbuilder.cardkaizoku.com/?deck=2xOP01-001\|3xOP01-002\|...` |
-
-Pega la URL del mazo en la pestaña **One Piece** de la interfaz gráfica y pulsa **Añadir**.
 
 ---
 
@@ -39,10 +60,6 @@ Pega la URL del mazo en la pestaña **One Piece** de la interfaz gráfica y puls
 | [riftbinder.com](https://riftbinder.com) | `https://riftbinder.com/decks/<ID>` |
 | [riftdex.com](https://riftdex.com) | `https://riftdex.com/deck/<UUID>` |
 
-Pega la URL del mazo en la pestaña **Riftbound** de la interfaz gráfica y pulsa **Añadir**.
-
-> **Nota:** Solo se pueden descargar mazos **públicos**. Si el mazo no está disponible (privado o eliminado), aparecerá un mensaje de error.
-
 ---
 
 ### Lorcana
@@ -53,161 +70,70 @@ Pega la URL del mazo en la pestaña **Riftbound** de la interfaz gráfica y puls
 | [inkdecks.com](https://inkdecks.com) | `https://inkdecks.com/lorcana-metagame/deck-nombre-ID` |
 | [dreamborn.ink](https://dreamborn.ink) | `https://dreamborn.ink/es/decks/ID` |
 
-Pega la URL del mazo en la pestaña **Lorcana** de la interfaz gráfica y pulsa **Añadir**.
-
-> **Nota:** dreamborn.ink requiere que **Google Chrome** esté instalado, ya que la web usa protección anti-bots que solo un navegador real puede superar. El programa abre Chrome minimizado, carga la página y lo cierra automáticamente.
-
 ---
 
-## Clave de API de Google Drive (recomendado)
-
-Las imágenes de los XMLs de MPCFill están alojadas en Google Drive. Sin configuración adicional, el programa las descarga usando `gdown` (peticiones anónimas), que puede recibir errores **429 — rate limit** al descargar muchas imágenes seguidas.
-
-Para evitarlo, configura una **API Key de Google Drive** (gratuita, no requiere OAuth ni cuenta de servicio):
-
-1. Ve a [Google Cloud Console](https://console.cloud.google.com/).
-2. Crea un proyecto (o usa uno existente).
-3. Activa la **Google Drive API** (Biblioteca → busca "Google Drive API" → Habilitar).
-4. Ve a **Credenciales** → **Crear credenciales** → **Clave de API**.
-5. (Opcional pero recomendado) Restringe la clave a la Google Drive API.
-6. Copia el archivo `config.example.json` y renómbralo a `config.json`:
-   ```
-   cp config.example.json config.json
-   ```
-7. Abre `config.json` y pega tu clave:
-   ```json
-   {
-     "google_drive_api_key": "AIza..."
-   }
-   ```
-
-> **`config.json` está en `.gitignore` y nunca se sube al repositorio.**
-> Si no configuras la clave, el programa sigue funcionando con `gdown` como antes.
-
----
-
-## Instalación
+## Instalación y Ejecución
 
 ### 1. Requisitos previos
+- **Python 3.10 o superior** ([descarga oficial](https://www.python.org/downloads/)).
 
-- **Python 3.10 o superior** ([descarga oficial](https://www.python.org/downloads/)). Durante la instalación marca *"Add Python to PATH"*.
-- **Git** (opcional, solo si clonas el repositorio).
-
-Verifica:
-```
-python --version
-```
-
-### 2. Obtener el código
-
-Clónalo:
-```
-git clone <url-del-repo> MPCFillToPDF
-cd MPCFillToPDF
-```
-
-O descarga el ZIP del repositorio y descomprímelo.
-
-### 3. Crear un entorno virtual (recomendado)
-
-```
+### 2. Entorno virtual e instalación
+```bash
 python -m venv .venv
-.venv\Scripts\activate          # Windows
-source .venv/bin/activate       # Linux/macOS
-```
+source .venv/bin/activate    # En Linux / macOS
+.venv\Scripts\activate       # En Windows
 
-### 4. Instalar dependencias
-
-```
 pip install -r requirements.txt
 ```
 
-Instala `Pillow`, `reportlab` y `gdown`.
-
----
-
-## Uso
-
-### Interfaz gráfica (GUI)
-
-Lanza la ventana:
-```
+### 3. Lanzar la aplicación
+```bash
 python -m gui.main
 ```
 
-Aparece una ventana con:
-
-- **Seleccionar XMLs…** abre el explorador para elegir uno o varios `.xml` (Ctrl+click para varios).
-- **Lista** con los archivos en cola y botones para *Quitar selección* / *Vaciar*.
-- **Conservar caché**: si está marcado, no borra `workdir/raw` y `workdir/bled` al terminar (acelera futuras regeneraciones del mismo XML). **Por defecto desactivado.**
-- **Generar PDF(s)**: arranca el proceso. Solo se activa cuando hay al menos un XML en la lista o un mazo añadido desde una web.
-- **Estado + barra de progreso** se actualizan durante la generación.
-
-Antes de generar:
-- Si las barajas pueden **fusionarse** sin dejar huecos (suma múltiplo de 9), aparece un diálogo informativo con el plan.
-- Si alguna baraja **dejará huecos** en su PDF, aparece un diálogo de advertencia *"¿Continuar de todos modos?"*.
-
-Cuando termina, **se abre automáticamente la carpeta `out/`** en el Explorador.
-
-### Empaquetar como `.exe` portable (Windows)
-
+### 4. Modo por lotes en línea de comandos (CLI)
+```bash
+python -m cli.main
 ```
+Procesa todos los archivos `.xml` ubicados en `xml/` y deposita los PDFs resultantes en `out/`.
+
+### 5. Empaquetar como `.exe` portable (Windows)
+```bash
 pip install pyinstaller
 python build_exe.py
 ```
-
-Genera `dist/MPCFillToPDF.exe`. El ejecutable es portable: en la carpeta donde lo dejes creará automáticamente `out/` y `workdir/` al ejecutarse por primera vez.
-
----
-
-## Cómo se evita pagar páginas con huecos
-
-La imprenta cobra cada A4 entera aunque no esté llena. Como cada página tiene 3×3 = 9 cartas, si el total no es múltiplo de 9 la última página queda con espacios vacíos pagados.
-
-El sistema lo gestiona así:
-
-1. **Cuenta las cartas** de cada XML antes de empezar.
-2. **Si la suma de los XMLs *no múltiplos de 9*** sí es múltiplo de 9 → los fusiona en un único PDF llamado `<a>_<b>_..._union.pdf`. Cada carta conserva su reverso original.
-3. **Si la suma sigue sin ser múltiplo de 9** → avisa de los huecos y pide confirmación.
-4. Cuando hay fusiones, escribe **`resumen.txt`** dentro de la carpeta de la ejecución con el desglose:
-   ```
-   PDF: mazo_a_mazo_b_union.pdf  (99 cartas)
-     - 95 carta(s) de mazo_a.xml
-     - 4 carta(s) de mazo_b.xml
-   ```
+Genera `dist/MPCFillToPDF.exe`. El ejecutable es completamente portable: en el directorio donde se ejecute creará automáticamente:
+- `MPCFillToPDF/inventario.db` (Base de datos SQLite de tu colección y mazos).
+- `MPCFillToPDF/archivos generados/` (PDFs listos para imprimir).
+- `MPCFillToPDF/procesamiento/` (Caché de imágenes intermedias y miniaturas).
 
 ---
 
-## Estructura del proyecto
+## Estructura del Proyecto
 
 ```
 MPCFillToPDF/
-├── out/                  ← una subcarpeta por ejecución (DD_MM_YYYY_HH-MM-SS) con los PDFs y, si hay fusión, resumen.txt
-├── workdir/              ← caché temporal: raw/ (descargas) y bled/ (recortes)
-├── gui/
-│   ├── main.py           ← entrada GUI (Tkinter)
-│   └── paths.py          ← resolver out/ y workdir/ junto al .exe
 ├── src/
-│   ├── parser.py         ← XML → estructura de cartas
-│   ├── downloader.py     ← descarga desde Google Drive (gdown, 5 threads)
-│   ├── cropper.py        ← quita bleed de MPC y añade espejo de 1 mm
-│   ├── pdf_generator.py  ← maquetación + crop marks + barra de calibración
-│   ├── pipeline.py       ← orquestador (run, run_merged)
-│   ├── precheck.py       ← conteo, planificación de fusiones, manifiesto
-│   ├── op_scraper.py     ← descarga mazos de One Piece desde webs especializadas
-│   └── assets/           ← imágenes embebidas (color_bar.png, corner_mark.png)
-├── resources/
-│   └── backs/op/         ← reversos para cartas de One Piece (default.png, lider.png)
-└── build_exe.py          ← script de empaquetado PyInstaller
+│   ├── engine/                # Motor de tareas en segundo plano (TaskManager, colas de eventos)
+│   ├── inventory/             # Dominio de Inventario SQLite, importador ManaBox y solver de proxies
+│   │   ├── db.py              # Esquema SQLite, WAL mode e índices
+│   │   ├── models.py          # Modelos InventoryCard, DeckRecord, MissingProxyPlan
+│   │   ├── manabox_csv.py     # Parser CSV con soporte Merge y Replace
+│   │   └── service.py         # CRUD de colección y asignación de stock
+│   ├── parser.py              # Parser de XMLs de MPCFill
+│   ├── downloader.py          # Descargador concurrente con control de reintentos
+│   ├── cropper.py             # Recorte de sangrado MPC y generación de espejo
+│   ├── pdf_generator.py       # Ensamblado de PDFs (ReportLab) con límites de tamaño
+│   ├── pipeline.py            # Orquestador del flujo de impresión
+│   ├── scryfall.py            # Cliente API Scryfall y gestión de caché
+│   └── quality.py             # Análisis de resolución y nitidez (Laplaciano)
+├── gui/
+│   ├── main.py                # Punto de entrada de la aplicación GUI
+│   ├── app.py                 # Ventana única, enrutador y ciclo de vida
+│   ├── paths.py               # Resolución de rutas de datos persistentes
+│   ├── components/            # Widgets reutilizables (NavBar, CardHoverPreview)
+│   └── views/                 # Pantallas (HubView, InventoryView, GeneratorView, ValidatorView, SettingsView)
+├── cli/                       # Procesador desatendido en consola
+├── docs/                      # Documentos de arquitectura, ADRs y planes
+└── tests/                     # Suite completa de pruebas automatizadas (635+ tests)
 ```
-
-## Formato del PDF generado
-
-- A4 vertical, 3 columnas × 3 filas = 9 cartas por página.
-- Carta: 63,5 × 88,9 mm (tamaño estándar MPC).
-- Sangrado en espejo de 1 mm alrededor de cada carta.
-- Página `n`: frentes en orden de slot (0–8, izquierda → derecha, arriba → abajo).
-- Página `nB`: dorsos espejados horizontalmente para que el doble cara case.
-- Líneas de corte 1 pt en los márgenes (no cruzan el interior).
-- Marcas de registro en las 4 esquinas + barra CMYK arriba para calibración de imprenta.
-- Numeración de pareja en la esquina inferior derecha: `1`, `1B`, `2`, `2B`, …
