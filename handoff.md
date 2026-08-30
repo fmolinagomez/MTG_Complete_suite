@@ -1,20 +1,27 @@
-# Next Session Handoff: Splash Hub & Card Inventory System
+# Next Session Handoff: Card Inventory Enhancements & Deck Synchronization
 
-All architectural decisions, domain concepts, database schemas, and implementation plans have been thoroughly grilled, finalized, and documented. The project is 100% ready for coding.
+All features for Advanced Collection Filtering, Natural Column Sorting, Card Deck Usage Popup, and Exact vs Alternative (`oracle_id`) Deck Synchronization have been fully implemented, tested, and documented.
 
 ---
 
-## 1. Summary of Completed Specifications & Decisions
+## 1. Summary of Completed Features
 
-- **Window Lifecycle**: Single-Window application (`gui.app.App`) starting on a **Splash Hub** with a **Persistent Top Navigation Bar** (`NavBar`) and dynamic view switching (`FrameSwitcher`).
-- **Concurrency & Task Management**: Background operations (PDF generation, bulk Scryfall checks, CSV imports) dispatched through `src/engine/task_manager.py` with unified event queue.
-- **Card Inventory & Deck Binder Domain (`src/inventory/`)**:
-  - Embedded SQLite database in `MPCFillToPDF/inventario.db`.
-  - ManaBox CSV parser with user prompt for **Merge** (smart upsert preserving deck bindings) vs. **Replace** (full reset of unassigned stock).
-  - Stock allocation strategy **Option C**: Tracks owned physical stock vs. allocated in-use quantity across registered decks.
-  - Moxfield deck integration: Computes missing cards, automatically generates a print-ready PDF of **only missing proxies**, and registers the deck.
-  - Deck-to-inventory import: 1-click action to dump all cards of a deck into the inventory as real cards or proxies.
-- **Interactive Previews**: Hover tooltip (`card_preview_hover.py`) displaying cached Scryfall `small` card images on mouse hover over table rows.
+- **Card Decks Usage Popup (`CardDecksUsageDialog`)**:
+  - Modal dialog triggered via double-click on table rows or `"🔍 Ver en Mazos"` button.
+  - Cross-references all registered decks to display deck name, format, required copies, version, and physical vs proxy type.
+  - Real-time resolution via `InventoryService.get_card_deck_usages`.
+- **Advanced Collection Filtering & Smart Column Sorting**:
+  - Collapsible filter panel with usage state (*Todas*, *Solo Disponibles*, *Solo Asignadas a Mazos*), dynamic set codes, and rarity.
+  - Instant *"Limpiar Filtros"* reset action.
+  - Interactive table headers with ascending (▲) / descending (▼) toggling.
+  - Natural sorting: numeric for quantities/numbers, case-insensitive for text, and boolean grouping for foil/proxy flags.
+- **Detailed Deck ↔ Inventory Synchronization (Exact vs Alternative Stock)**:
+  - When loading or selecting a deck in the decks view:
+    - Calculates available **Exact Stock** (`set_code` + `collector_number`).
+    - Calculates available **Alternative Stock** (matching `oracle_id` or canonical name in other editions).
+    - Calculates **Missing Copies** (proxies to print in PDF).
+    - Status badges: 🟢 `Exacta`, 🔵 `Alternativa (Mismo Oracle)`, ⚠️ `Parcial`, 🔴 `Faltante (Proxy)`.
+    - Live summary banner: `"Requeridas: X | Stock Exacto: Y | Stock Alternativo: Z | Faltantes (Proxies a Imprimir): W"`.
 
 ---
 
@@ -22,27 +29,14 @@ All architectural decisions, domain concepts, database schemas, and implementati
 
 - **Domain Glossary**: [CONTEXT.md](file:///Users/molins/Dev/MPCFillToPDF/CONTEXT.md)
 - **Developer Guide & Project Structure**: [CLAUDE.md](file:///Users/molins/Dev/MPCFillToPDF/CLAUDE.md)
-- **Architecture Decision Record**: [docs/adr/0002-modular-hub-and-inventory-system.md](file:///Users/molins/Dev/MPCFillToPDF/docs/adr/0002-modular-hub-and-inventory-system.md)
-- **Detailed Implementation Plan**: [docs/implementation-plan-inventory-hub.md](file:///Users/molins/Dev/MPCFillToPDF/docs/implementation-plan-inventory-hub.md)
-- **Previous Architecture Review**: [docs/architecture-review.md](file:///Users/molins/Dev/MPCFillToPDF/docs/architecture-review.md)
+- **Project Overview & Setup**: [README.md](file:///Users/molins/Dev/MPCFillToPDF/README.md)
+- **Test Suite**: 648 passing tests covering 100% of domain services, models, and GUI components.
 
 ---
 
-## 3. Ready-to-Execute Implementation Steps
+## 3. Potential Next Steps
 
-When resuming in the next session, follow this step-by-step roadmap:
+1. **Live Pricing & Collection Value**: Integration of Scryfall live EUR/USD price caching in inventory metadata.
+2. **Export Options**: Exporting collection or decks to CSV, ManaBox format, or Moxfield text lists.
+3. **Batch Operations**: Multi-selection actions in the inventory table (batch delete, batch tag as proxy/foil, batch assign to deck).
 
-1. **Step 1: Domain & Storage Layer** (`src/inventory/`)
-   - Implement `src/inventory/models.py`, `src/inventory/db.py`, and `tests/test_inventory_db.py`.
-   - Implement `src/inventory/manabox_csv.py` and `tests/test_manabox_csv.py`.
-   - Implement `src/inventory/service.py` and `tests/test_inventory_service.py`.
-2. **Step 2: Task Engine** (`src/engine/`)
-   - Implement `src/engine/task_manager.py` and `tests/test_task_manager.py`.
-3. **Step 3: UI Components & Image Hover Tooltip** (`gui/components/`)
-   - Implement `gui/components/nav_bar.py` and `gui/components/card_preview_hover.py`.
-4. **Step 4: Modular Views & Hub Application** (`gui/views/` & `gui/app.py`)
-   - Implement `gui/views/hub_view.py`, `gui/views/inventory_view.py`.
-   - Refactor `gui/views/generator_view.py`, `gui/views/validator_view.py`, `gui/views/settings_view.py`.
-   - Wire up `gui/app.py` and update `gui/main.py`.
-5. **Step 5: Full Test Suite & Validation**
-   - Run `python -m pytest tests/` and perform manual UX verification.

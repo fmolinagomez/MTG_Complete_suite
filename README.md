@@ -149,9 +149,9 @@ MPCFillToPDF/
 │   ├── engine/                # Motor de tareas en segundo plano (TaskManager, colas de eventos)
 │   ├── inventory/             # Dominio de Inventario SQLite, importador ManaBox y solver de proxies
 │   │   ├── db.py              # Esquema SQLite, WAL mode e índices
-│   │   ├── models.py          # Modelos InventoryCard, DeckRecord, MissingProxyPlan
+│   │   ├── models.py          # Modelos InventoryCard, DeckRecord, DeckCardMatchDetail, MissingProxyPlan
 │   │   ├── manabox_csv.py     # Parser CSV con soporte Merge y Replace
-│   │   └── service.py         # CRUD de colección y asignación de stock
+│   │   └── service.py         # CRUD de colección, disponibilidad exacta/alternativa y asignación de stock
 │   ├── parser.py              # Parser de XMLs de MPCFill
 │   ├── downloader.py          # Descargador concurrente con control de reintentos
 │   ├── cropper.py             # Recorte de sangrado MPC y generación de espejo
@@ -167,5 +167,6 @@ MPCFillToPDF/
 │   └── views/                 # Pantallas (HubView, InventoryView, GeneratorView, ValidatorView, SettingsView)
 ├── cli/                       # Procesador desatendido en consola
 ├── docs/                      # Documentos de arquitectura, ADRs y planes
-└── tests/                     # Suite completa de pruebas automatizadas (635+ tests)
+└── tests/                     # Suite completa de pruebas automatizadas (648+ tests)
 ```
+

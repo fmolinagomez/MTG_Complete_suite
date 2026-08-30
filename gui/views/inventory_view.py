@@ -21,6 +21,165 @@ from src.scryfall import download_deck_images
 _log = logging.getLogger(__name__)
 
 
+class CardDecksUsageDialog(tk.Toplevel):
+    """Modal dialog displaying all decks using a specific inventory card."""
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        card: InventoryCard,
+        inventory_service: InventoryService,
+        in_decks: int | None = None,
+        available: int | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.title(f"Uso en Mazos — {card.name}")
+        self.resizable(True, True)
+        self.transient(parent.winfo_toplevel() if hasattr(parent, "winfo_toplevel") else parent)
+        self.grab_set()
+
+        self.card = card
+        self.inventory_service = inventory_service
+        self.in_decks = in_decks
+        self.available = available
+
+        self.lbl_empty: ttk.Label | None = None
+        self.usage_tree: ttk.Treeview | None = None
+
+        self._build_ui()
+        self._center_window(parent)
+
+    def _build_ui(self) -> None:
+        container = ttk.Frame(self, padding=12)
+        container.pack(fill=tk.BOTH, expand=True)
+
+        # Header Info frame
+        header_frame = ttk.Frame(container)
+        header_frame.pack(fill=tk.X, pady=(0, 8))
+
+        set_disp = self.card.set_code.upper() if self.card.set_code else "--"
+        num_disp = self.card.collector_number if self.card.collector_number else "--"
+
+        title_lbl = ttk.Label(
+            header_frame,
+            text=f"{self.card.name} ({set_disp} #{num_disp})",
+            font=("Segoe UI", 11, "bold"),
+        )
+        title_lbl.pack(anchor=tk.W, pady=(0, 4))
+
+        # Query deck usages
+        usages = self.inventory_service.get_card_deck_usages(
+            oracle_id=self.card.oracle_id,
+            card_name=self.card.name,
+        )
+
+        in_decks_count = (
+            self.in_decks if self.in_decks is not None else sum(u["quantity_required"] for u in usages)
+        )
+        avail_count = (
+            self.available if self.available is not None else max(0, self.card.quantity - in_decks_count)
+        )
+
+        stats_lbl = ttk.Label(
+            header_frame,
+            text=(
+                f"Total Copias: {self.card.quantity}  |  "
+                f"Disponibles: {avail_count}  |  "
+                f"En Mazos: {in_decks_count}"
+            ),
+            font=("Segoe UI", 9),
+            foreground="#444444",
+        )
+        stats_lbl.pack(anchor=tk.W)
+
+        ttk.Separator(container, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(4, 8))
+
+        if not usages:
+            self.lbl_empty = ttk.Label(
+                container,
+                text="Esta carta no está asignada a ningún mazo registrado actualmente.",
+                font=("Segoe UI", 9, "italic"),
+                foreground="#666666",
+            )
+            self.lbl_empty.pack(expand=True, pady=30)
+        else:
+            table_frame = ttk.Frame(container)
+            table_frame.pack(fill=tk.BOTH, expand=True)
+
+            usage_cols = ("deck_name", "format", "quantity", "version", "is_proxy")
+            self.usage_tree = ttk.Treeview(
+                table_frame,
+                columns=usage_cols,
+                show="headings",
+                selectmode="browse",
+            )
+
+            self.usage_tree.heading("deck_name", text="Mazo", anchor=tk.W)
+            self.usage_tree.heading("format", text="Formato", anchor=tk.CENTER)
+            self.usage_tree.heading("quantity", text="Cantidad", anchor=tk.CENTER)
+            self.usage_tree.heading("version", text="Versión", anchor=tk.CENTER)
+            self.usage_tree.heading("is_proxy", text="Tipo", anchor=tk.CENTER)
+
+            self.usage_tree.column("deck_name", width=180, minwidth=100, anchor=tk.W)
+            self.usage_tree.column("format", width=100, minwidth=70, anchor=tk.CENTER)
+            self.usage_tree.column("quantity", width=70, minwidth=50, anchor=tk.CENTER)
+            self.usage_tree.column("version", width=110, minwidth=80, anchor=tk.CENTER)
+            self.usage_tree.column("is_proxy", width=70, minwidth=50, anchor=tk.CENTER)
+
+            vsb = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.usage_tree.yview)
+            self.usage_tree.configure(yscrollcommand=vsb.set)
+
+            self.usage_tree.grid(row=0, column=0, sticky="nsew")
+            vsb.grid(row=0, column=1, sticky="ns")
+            table_frame.rowconfigure(0, weight=1)
+            table_frame.columnconfigure(0, weight=1)
+
+            for u in usages:
+                sc = (u.get("set_code") or "").strip().upper()
+                cn = (u.get("collector_number") or "").strip()
+                if sc and cn:
+                    version_str = f"{sc} #{cn}"
+                elif sc:
+                    version_str = sc
+                else:
+                    version_str = "--"
+
+                tipo_str = "Proxy" if u.get("is_proxy") else "Física"
+
+                self.usage_tree.insert(
+                    "",
+                    tk.END,
+                    values=(
+                        u.get("deck_name", ""),
+                        u.get("format", ""),
+                        u.get("quantity_required", 1),
+                        version_str,
+                        tipo_str,
+                    ),
+                )
+
+        btn_box = ttk.Frame(container)
+        btn_box.pack(fill=tk.X, pady=(8, 0))
+
+        btn_close = ttk.Button(btn_box, text="Cerrar", command=self.destroy)
+        btn_close.pack(side=tk.RIGHT)
+
+        self.bind("<Return>", lambda _e: self.destroy())
+        self.bind("<Escape>", lambda _e: self.destroy())
+
+    def _center_window(self, parent: tk.Misc) -> None:
+        self.update_idletasks()
+        w, h = max(540, self.winfo_reqwidth()), max(320, self.winfo_reqheight())
+        try:
+            pw, ph = parent.winfo_width(), parent.winfo_height()
+            px, py = parent.winfo_rootx(), parent.winfo_rooty()
+            x = px + max(0, (pw - w) // 2)
+            y = py + max(0, (ph - h) // 2)
+        except Exception:
+            x, y = 200, 200
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
+
 class ManaBoxImportDialog(tk.Toplevel):
     """Modal dialog asking the user whether to merge or replace the inventory when importing ManaBox CSV."""
 
@@ -340,6 +499,7 @@ class InventoryView(ttk.Frame):
 
         # Data caches
         self._inv_item_to_card: dict[str, InventoryCard] = {}
+        self._inv_item_to_usage: dict[str, tuple[int, int]] = {}
         self._deck_item_to_info: dict[str, CardPreviewInfo] = {}
         self._registered_decks: list[DeckRecord] = []
         self._current_deck_id: int | None = None
@@ -348,7 +508,29 @@ class InventoryView(ttk.Frame):
         # UI State variables
         self._search_var = tk.StringVar()
         self._filter_type_var = tk.StringVar(value="Todas")
+        self._filter_usage_var = tk.StringVar(value="Todas")
+        self._filter_set_var = tk.StringVar(value="Todas las ediciones")
+        self._filter_rarity_var = tk.StringVar(value="Todas")
         self._deck_url_var = tk.StringVar()
+
+        # Sorting state
+        self._inv_sort_col: str | None = None
+        self._inv_sort_descending: bool = False
+        self._inv_col_headings: dict[str, str] = {
+            "name": "Nombre",
+            "set_code": "Edición",
+            "collector_number": "Número",
+            "quantity": "Total",
+            "available": "Disponibles",
+            "in_decks": "En Mazos",
+            "foil": "Foil",
+            "proxy": "Proxy",
+            "condition": "Condición",
+            "language": "Idioma",
+        }
+
+        # Advanced filters visibility
+        self._adv_filters_visible: bool = False
 
         self._build_ui()
         self._schedule_poll()
@@ -374,75 +556,138 @@ class InventoryView(ttk.Frame):
 
     def _build_collection_tab(self, parent: ttk.Frame) -> None:
         # Top toolbar
-        toolbar = ttk.Frame(parent, padding=(4, 6))
-        toolbar.pack(fill=tk.X)
+        self.toolbar_frame = ttk.Frame(parent, padding=(4, 6))
+        self.toolbar_frame.pack(fill=tk.X)
 
-        # Search & Filter
-        ttk.Label(toolbar, text="Buscar:").pack(side=tk.LEFT, padx=(2, 4))
-        self.ent_search = ttk.Entry(toolbar, textvariable=self._search_var, width=22)
-        self.ent_search.pack(side=tk.LEFT, padx=(0, 8))
+        # Search & Quick Filter
+        ttk.Label(self.toolbar_frame, text="Buscar:").pack(side=tk.LEFT, padx=(2, 4))
+        self.ent_search = ttk.Entry(self.toolbar_frame, textvariable=self._search_var, width=20)
+        self.ent_search.pack(side=tk.LEFT, padx=(0, 6))
         self._search_var.trace_add("write", lambda *_: self._filter_collection_table())
 
-        ttk.Label(toolbar, text="Filtrar:").pack(side=tk.LEFT, padx=(4, 4))
+        ttk.Label(self.toolbar_frame, text="Filtrar:").pack(side=tk.LEFT, padx=(4, 4))
         self.cb_filter = ttk.Combobox(
-            toolbar,
+            self.toolbar_frame,
             textvariable=self._filter_type_var,
             values=["Todas", "Solo Reales", "Solo Proxies", "Solo Foils"],
             state="readonly",
-            width=14,
+            width=13,
         )
-        self.cb_filter.pack(side=tk.LEFT, padx=(0, 8))
+        self.cb_filter.pack(side=tk.LEFT, padx=(0, 6))
         self.cb_filter.bind("<<ComboboxSelected>>", lambda _: self._filter_collection_table())
 
-        btn_refresh = ttk.Button(toolbar, text="🔄 Refrescar", command=self.refresh_data)
-        btn_refresh.pack(side=tk.LEFT, padx=(0, 12))
+        self.btn_toggle_filters = ttk.Button(
+            self.toolbar_frame,
+            text="🔽 Filtros Avanzados",
+            command=self._toggle_advanced_filters,
+        )
+        self.btn_toggle_filters.pack(side=tk.LEFT, padx=(0, 6))
+
+        btn_refresh = ttk.Button(self.toolbar_frame, text="🔄 Refrescar", command=self.refresh_data)
+        btn_refresh.pack(side=tk.LEFT, padx=(0, 10))
 
         # Action Buttons (Right aligned)
         btn_import_csv = ttk.Button(
-            toolbar,
-            text="📥 Importar CSV de ManaBox",
+            self.toolbar_frame,
+            text="📥 Importar CSV",
             command=self._on_import_csv_click,
         )
-        btn_import_csv.pack(side=tk.RIGHT, padx=3)
+        btn_import_csv.pack(side=tk.RIGHT, padx=2)
+
+        btn_view_decks = ttk.Button(
+            self.toolbar_frame,
+            text="🔍 Ver en Mazos",
+            command=self._on_view_card_decks_click,
+        )
+        btn_view_decks.pack(side=tk.RIGHT, padx=2)
 
         btn_add_card = ttk.Button(
-            toolbar,
+            self.toolbar_frame,
             text="➕ Añadir Carta",
             command=self._on_add_card_click,
         )
-        btn_add_card.pack(side=tk.RIGHT, padx=3)
+        btn_add_card.pack(side=tk.RIGHT, padx=2)
 
         btn_delete_card = ttk.Button(
-            toolbar,
-            text="🗑️ Eliminar Carta",
+            self.toolbar_frame,
+            text="🗑️ Eliminar",
             command=self._on_delete_card_click,
         )
-        btn_delete_card.pack(side=tk.RIGHT, padx=3)
+        btn_delete_card.pack(side=tk.RIGHT, padx=2)
+
+        # Collapsible Advanced Filters Frame
+        self.adv_filters_frame = ttk.LabelFrame(parent, text="Filtros Avanzados", padding=(8, 6))
+
+        ttk.Label(self.adv_filters_frame, text="Estado de Uso:").pack(side=tk.LEFT, padx=(2, 4))
+        self.cb_filter_usage = ttk.Combobox(
+            self.adv_filters_frame,
+            textvariable=self._filter_usage_var,
+            values=["Todas", "Solo Disponibles (libres)", "Solo Asignadas a Mazos"],
+            state="readonly",
+            width=22,
+        )
+        self.cb_filter_usage.pack(side=tk.LEFT, padx=(0, 10))
+        self.cb_filter_usage.bind("<<ComboboxSelected>>", lambda _: self._filter_collection_table())
+
+        ttk.Label(self.adv_filters_frame, text="Edición:").pack(side=tk.LEFT, padx=(4, 4))
+        self.cb_filter_set = ttk.Combobox(
+            self.adv_filters_frame,
+            textvariable=self._filter_set_var,
+            values=["Todas las ediciones"],
+            state="readonly",
+            width=18,
+        )
+        self.cb_filter_set.pack(side=tk.LEFT, padx=(0, 10))
+        self.cb_filter_set.bind("<<ComboboxSelected>>", lambda _: self._filter_collection_table())
+
+        ttk.Label(self.adv_filters_frame, text="Rareza:").pack(side=tk.LEFT, padx=(4, 4))
+        self.cb_filter_rarity = ttk.Combobox(
+            self.adv_filters_frame,
+            textvariable=self._filter_rarity_var,
+            values=["Todas", "Mítica", "Rara", "Infrecuente", "Común"],
+            state="readonly",
+            width=12,
+        )
+        self.cb_filter_rarity.pack(side=tk.LEFT, padx=(0, 10))
+        self.cb_filter_rarity.bind("<<ComboboxSelected>>", lambda _: self._filter_collection_table())
+
+        btn_reset = ttk.Button(
+            self.adv_filters_frame,
+            text="🧹 Limpiar Filtros",
+            command=self._on_reset_filters_click,
+        )
+        btn_reset.pack(side=tk.RIGHT, padx=4)
 
         # Collection Treeview Table
         tree_frame = ttk.Frame(parent)
         tree_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-        columns = ("name", "set_code", "collector_number", "quantity", "foil", "proxy", "condition", "language")
+        columns = (
+            "name",
+            "set_code",
+            "collector_number",
+            "quantity",
+            "available",
+            "in_decks",
+            "foil",
+            "proxy",
+            "condition",
+            "language",
+        )
         self.inv_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", selectmode="browse")
 
-        self.inv_tree.heading("name", text="Nombre", anchor=tk.W)
-        self.inv_tree.heading("set_code", text="Edición", anchor=tk.CENTER)
-        self.inv_tree.heading("collector_number", text="Número", anchor=tk.CENTER)
-        self.inv_tree.heading("quantity", text="Cantidad", anchor=tk.CENTER)
-        self.inv_tree.heading("foil", text="Foil", anchor=tk.CENTER)
-        self.inv_tree.heading("proxy", text="Proxy", anchor=tk.CENTER)
-        self.inv_tree.heading("condition", text="Condición", anchor=tk.CENTER)
-        self.inv_tree.heading("language", text="Idioma", anchor=tk.CENTER)
+        self._update_inv_column_headings()
 
-        self.inv_tree.column("name", width=260, minwidth=140, anchor=tk.W)
-        self.inv_tree.column("set_code", width=80, minwidth=60, anchor=tk.CENTER)
-        self.inv_tree.column("collector_number", width=70, minwidth=50, anchor=tk.CENTER)
-        self.inv_tree.column("quantity", width=70, minwidth=50, anchor=tk.CENTER)
-        self.inv_tree.column("foil", width=60, minwidth=40, anchor=tk.CENTER)
+        self.inv_tree.column("name", width=240, minwidth=130, anchor=tk.W)
+        self.inv_tree.column("set_code", width=70, minwidth=50, anchor=tk.CENTER)
+        self.inv_tree.column("collector_number", width=65, minwidth=45, anchor=tk.CENTER)
+        self.inv_tree.column("quantity", width=60, minwidth=40, anchor=tk.CENTER)
+        self.inv_tree.column("available", width=75, minwidth=50, anchor=tk.CENTER)
+        self.inv_tree.column("in_decks", width=75, minwidth=50, anchor=tk.CENTER)
+        self.inv_tree.column("foil", width=55, minwidth=40, anchor=tk.CENTER)
         self.inv_tree.column("proxy", width=60, minwidth=40, anchor=tk.CENTER)
-        self.inv_tree.column("condition", width=80, minwidth=60, anchor=tk.CENTER)
-        self.inv_tree.column("language", width=60, minwidth=40, anchor=tk.CENTER)
+        self.inv_tree.column("condition", width=70, minwidth=50, anchor=tk.CENTER)
+        self.inv_tree.column("language", width=55, minwidth=40, anchor=tk.CENTER)
 
         vsb = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.inv_tree.yview)
         hsb = ttk.Scrollbar(tree_frame, orient=tk.HORIZONTAL, command=self.inv_tree.xview)
@@ -458,6 +703,9 @@ class InventoryView(ttk.Frame):
         self.inv_tree.tag_configure("proxy_tag", foreground="#666666")
         self.inv_tree.tag_configure("foil_tag", foreground="#996515")
 
+        # Double-click opens card deck usages dialog
+        self.inv_tree.bind("<Double-1>", self._on_card_double_click)
+
         # Attach Floating Preview Tooltip
         self._preview_hover.attach_to_treeview(self.inv_tree, self._resolve_inv_card_preview)
 
@@ -471,6 +719,76 @@ class InventoryView(ttk.Frame):
             foreground="#444444",
         )
         self.lbl_stats.pack(side=tk.LEFT)
+
+    def _toggle_advanced_filters(self) -> None:
+        if self._adv_filters_visible:
+            self.adv_filters_frame.pack_forget()
+            self.btn_toggle_filters.configure(text="🔽 Filtros Avanzados")
+            self._adv_filters_visible = False
+        else:
+            self.adv_filters_frame.pack(fill=tk.X, after=self.toolbar_frame, padx=4, pady=(0, 4))
+            self.btn_toggle_filters.configure(text="🔼 Ocultar Filtros")
+            self._adv_filters_visible = True
+
+    def _on_reset_filters_click(self) -> None:
+        self._search_var.set("")
+        self._filter_type_var.set("Todas")
+        self._filter_usage_var.set("Todas")
+        self._filter_set_var.set("Todas las ediciones")
+        self._filter_rarity_var.set("Todas")
+        self._filter_collection_table()
+
+    def _update_inv_column_headings(self) -> None:
+        for col, title in self._inv_col_headings.items():
+            anchor = tk.W if col == "name" else tk.CENTER
+            if col == self._inv_sort_col:
+                arrow = " ▼" if self._inv_sort_descending else " ▲"
+                heading_text = f"{title}{arrow}"
+            else:
+                heading_text = title
+            self.inv_tree.heading(
+                col,
+                text=heading_text,
+                anchor=anchor,
+                command=lambda c=col: self._sort_collection_by_column(c),
+            )
+
+    def _sort_collection_by_column(self, col: str) -> None:
+        if self._inv_sort_col == col:
+            self._inv_sort_descending = not self._inv_sort_descending
+        else:
+            self._inv_sort_col = col
+            self._inv_sort_descending = False
+
+        self._update_inv_column_headings()
+        self._filter_collection_table()
+
+    def _get_card_sort_key(self, item: tuple[InventoryCard, int, int], col: str):
+        card, in_decks_qty, available_qty = item
+        if col == "name":
+            return (card.name or "").lower()
+        elif col == "set_code":
+            return (card.set_code or "").lower()
+        elif col == "collector_number":
+            try:
+                return (0, int(card.collector_number))
+            except (ValueError, TypeError):
+                return (1, (card.collector_number or "").lower())
+        elif col == "quantity":
+            return card.quantity
+        elif col == "available":
+            return available_qty
+        elif col == "in_decks":
+            return in_decks_qty
+        elif col == "foil":
+            return 1 if card.is_foil else 0
+        elif col == "proxy":
+            return 1 if card.is_proxy else 0
+        elif col == "condition":
+            return (card.condition or "").lower()
+        elif col == "language":
+            return (card.language or "").lower()
+        return ""
 
     def _resolve_inv_card_preview(self, item_id: str) -> CardPreviewInfo | None:
         card = self._inv_item_to_card.get(item_id)
@@ -493,15 +811,55 @@ class InventoryView(ttk.Frame):
         elif filter_mode == "Solo Proxies":
             filter_proxy = True
 
-        cards = self.inventory_service.get_inventory_cards(query=query, filter_proxy=filter_proxy)
+        usage_val = self._filter_usage_var.get().strip()
+        if usage_val == "Solo Disponibles (libres)":
+            filter_usage = "available"
+        elif usage_val == "Solo Asignadas a Mazos":
+            filter_usage = "in_decks"
+        else:
+            filter_usage = "all"
+
+        set_val = self._filter_set_var.get().strip()
+        filter_set = "" if set_val in ("Todas las ediciones", "Todas", "") else set_val
+
+        rarity_val = self._filter_rarity_var.get().strip()
+        rarity_map = {
+            "todas": "",
+            "mítica": "mythic",
+            "mitica": "mythic",
+            "mythic": "mythic",
+            "rara": "rare",
+            "rare": "rare",
+            "infrecuente": "uncommon",
+            "uncommon": "uncommon",
+            "común": "common",
+            "comun": "common",
+            "common": "common",
+        }
+        filter_rarity = rarity_map.get(rarity_val.lower(), rarity_val)
+
+        card_tuples = self.inventory_service.get_inventory_cards_with_usage(
+            query=query,
+            filter_proxy=filter_proxy,
+            filter_usage=filter_usage,
+            filter_set=filter_set,
+            filter_rarity=filter_rarity,
+        )
 
         if filter_mode == "Solo Foils":
-            cards = [c for c in cards if c.is_foil]
+            card_tuples = [t for t in card_tuples if t[0].is_foil]
+
+        if self._inv_sort_col:
+            card_tuples.sort(
+                key=lambda item: self._get_card_sort_key(item, self._inv_sort_col),
+                reverse=self._inv_sort_descending,
+            )
 
         self.inv_tree.delete(*self.inv_tree.get_children())
         self._inv_item_to_card.clear()
+        self._inv_item_to_usage.clear()
 
-        for card in cards:
+        for card, in_decks_qty, available_qty in card_tuples:
             foil_str = "✨ Sí" if card.is_foil else "No"
             proxy_str = "Proxy" if card.is_proxy else "Física"
             tags = ()
@@ -515,9 +873,11 @@ class InventoryView(ttk.Frame):
                 tk.END,
                 values=(
                     card.name,
-                    card.set_code.upper(),
-                    card.collector_number,
+                    card.set_code.upper() if card.set_code else "--",
+                    card.collector_number or "--",
                     card.quantity,
+                    available_qty,
+                    in_decks_qty,
                     foil_str,
                     proxy_str,
                     card.condition,
@@ -526,6 +886,28 @@ class InventoryView(ttk.Frame):
                 tags=tags,
             )
             self._inv_item_to_card[item_id] = card
+            self._inv_item_to_usage[item_id] = (in_decks_qty, available_qty)
+
+    def _on_card_double_click(self, _event=None) -> None:
+        self._open_selected_card_usage_dialog()
+
+    def _on_view_card_decks_click(self) -> None:
+        self._open_selected_card_usage_dialog()
+
+    def _open_selected_card_usage_dialog(self) -> None:
+        selected = self.inv_tree.selection()
+        if not selected:
+            messagebox.showwarning("Aviso", "Selecciona una carta del inventario primero.", parent=self)
+            return
+
+        item_id = selected[0]
+        card = self._inv_item_to_card.get(item_id)
+        if not card:
+            return
+
+        in_decks, available = self._inv_item_to_usage.get(item_id, (0, 0))
+        dlg = CardDecksUsageDialog(self, card, self.inventory_service, in_decks=in_decks, available=available)
+        self.wait_window(dlg)
 
     def _on_import_csv_click(self) -> None:
         csv_path_str = filedialog.askopenfilename(
@@ -633,22 +1015,24 @@ class InventoryView(ttk.Frame):
         table_frame = ttk.Frame(parent)
         table_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
 
-        deck_cols = ("name", "set_code", "collector_number", "qty_required", "stock", "status")
+        deck_cols = ("name", "set_code", "collector_number", "qty_required", "exact_stock", "alt_stock", "status")
         self.deck_tree = ttk.Treeview(table_frame, columns=deck_cols, show="headings", selectmode="browse")
 
         self.deck_tree.heading("name", text="Carta", anchor=tk.W)
-        self.deck_tree.heading("set_code", text="Edición", anchor=tk.CENTER)
+        self.deck_tree.heading("set_code", text="Edición Mazo", anchor=tk.CENTER)
         self.deck_tree.heading("collector_number", text="Número", anchor=tk.CENTER)
-        self.deck_tree.heading("qty_required", text="Cantidad Requerida", anchor=tk.CENTER)
-        self.deck_tree.heading("stock", text="Stock en Colección", anchor=tk.CENTER)
+        self.deck_tree.heading("qty_required", text="Requeridas", anchor=tk.CENTER)
+        self.deck_tree.heading("exact_stock", text="Stock Exacto", anchor=tk.CENTER)
+        self.deck_tree.heading("alt_stock", text="Stock Alternativo", anchor=tk.CENTER)
         self.deck_tree.heading("status", text="Estado", anchor=tk.CENTER)
 
-        self.deck_tree.column("name", width=260, minwidth=140, anchor=tk.W)
-        self.deck_tree.column("set_code", width=80, minwidth=60, anchor=tk.CENTER)
-        self.deck_tree.column("collector_number", width=70, minwidth=50, anchor=tk.CENTER)
-        self.deck_tree.column("qty_required", width=130, minwidth=80, anchor=tk.CENTER)
-        self.deck_tree.column("stock", width=130, minwidth=80, anchor=tk.CENTER)
-        self.deck_tree.column("status", width=150, minwidth=100, anchor=tk.CENTER)
+        self.deck_tree.column("name", width=240, minwidth=130, anchor=tk.W)
+        self.deck_tree.column("set_code", width=85, minwidth=60, anchor=tk.CENTER)
+        self.deck_tree.column("collector_number", width=65, minwidth=45, anchor=tk.CENTER)
+        self.deck_tree.column("qty_required", width=85, minwidth=60, anchor=tk.CENTER)
+        self.deck_tree.column("exact_stock", width=85, minwidth=60, anchor=tk.CENTER)
+        self.deck_tree.column("alt_stock", width=110, minwidth=70, anchor=tk.CENTER)
+        self.deck_tree.column("status", width=170, minwidth=110, anchor=tk.CENTER)
 
         vsb_deck = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.deck_tree.yview)
         hsb_deck = ttk.Scrollbar(table_frame, orient=tk.HORIZONTAL, command=self.deck_tree.xview)
@@ -662,6 +1046,7 @@ class InventoryView(ttk.Frame):
 
         # Tags for Deck Treeview
         self.deck_tree.tag_configure("owned", foreground="#2e7d32")
+        self.deck_tree.tag_configure("alt_stock", foreground="#1565c0")
         self.deck_tree.tag_configure("missing", foreground="#c62828", font=("Segoe UI", 9, "bold"))
         self.deck_tree.tag_configure("partial", foreground="#ef6c00")
 
@@ -775,64 +1160,61 @@ class InventoryView(ttk.Frame):
         self._current_deck_cards = deck_cards
 
         # Update info header
-        self.lbl_deck_info.configure(text=f"Formato: {deck_rec.format} | Total cartas: {sum(c.quantity_required for c in deck_cards)}")
+        self.lbl_deck_info.configure(
+            text=f"Formato: {deck_rec.format} | Total cartas: {sum(c.quantity_required for c in deck_cards)}"
+        )
 
-        # Calculate missing proxy plan (Stock Allocation Option C)
-        plan = self.inventory_service.calculate_missing_proxies(
-            deck_cards,
-            allocate_mode="exclusive",
-            current_deck_id=deck.id,
+        details_list, total_exact, total_alt, total_missing = (
+            self.inventory_service.analyze_deck_card_matches(
+                deck_cards,
+                current_deck_id=deck.id,
+            )
         )
 
         self.deck_tree.delete(*self.deck_tree.get_children())
         self._deck_item_to_info.clear()
 
-        # Build owned vs missing counts per (oracle_id, name)
-        owned_map: dict[str, int] = {}
-        for oc in plan.owned_cards:
-            key = oc.name.lower()
-            owned_map[key] = owned_map.get(key, 0) + oc.quantity_required
-
-        for card in deck_cards:
-            needed = card.quantity_required
-            c_key = card.name.lower()
-            owned_for_card = min(needed, owned_map.get(c_key, 0))
-            owned_map[c_key] = max(0, owned_map.get(c_key, 0) - owned_for_card)
-
-            if owned_for_card >= needed:
-                status_str = "🟢 Poseída"
+        for detail in details_list:
+            if detail.status == "exact":
+                status_str = "🟢 Exacta"
                 tag = "owned"
-            elif owned_for_card == 0:
+            elif detail.status == "alternative":
+                status_str = "🔵 Alternativa (Mismo Oracle)"
+                tag = "alt_stock"
+            elif detail.status == "partial":
+                status_str = f"⚠️ Parcial ({detail.exact_stock + detail.alt_stock}/{detail.quantity_required})"
+                tag = "partial"
+            else:
                 status_str = "🔴 Faltante (Proxy)"
                 tag = "missing"
-            else:
-                status_str = f"⚠️ Parcial ({owned_for_card}/{needed})"
-                tag = "partial"
 
             item_id = self.deck_tree.insert(
                 "",
                 tk.END,
                 values=(
-                    card.name,
-                    card.set_code.upper() if card.set_code else "--",
-                    card.collector_number or "--",
-                    needed,
-                    owned_for_card,
+                    detail.name,
+                    detail.set_code.upper() if detail.set_code else "--",
+                    detail.collector_number or "--",
+                    detail.quantity_required,
+                    detail.exact_stock,
+                    detail.alt_stock,
                     status_str,
                 ),
                 tags=(tag,),
             )
             self._deck_item_to_info[item_id] = CardPreviewInfo(
-                name=card.name,
-                set_code=card.set_code,
-                collector_number=card.collector_number,
+                name=detail.name,
+                set_code=detail.set_code,
+                collector_number=detail.collector_number,
             )
 
+        total_required = sum(c.quantity_required for c in deck_cards)
         self.lbl_plan_summary.configure(
             text=(
-                f"Requeridas: {plan.total_required}  |  "
-                f"Poseídas en Stock: {plan.total_owned}  |  "
-                f"Faltantes (Proxies a Imprimir): {plan.total_missing}"
+                f"Requeridas: {total_required} | "
+                f"Stock Exacto: {total_exact} | "
+                f"Stock Alternativo: {total_alt} | "
+                f"Faltantes (Proxies a Imprimir): {total_missing}"
             )
         )
 
@@ -997,10 +1379,16 @@ class InventoryView(ttk.Frame):
             )
         )
 
-        # 2. Update collection table
+        # 2. Update set codes in advanced filter combobox
+        unique_sets = ["Todas las ediciones"] + self.inventory_service.get_unique_set_codes()
+        self.cb_filter_set.configure(values=unique_sets)
+        if self._filter_set_var.get() not in unique_sets:
+            self._filter_set_var.set("Todas las ediciones")
+
+        # 3. Update collection table
         self._filter_collection_table()
 
-        # 3. Update registered decks selector
+        # 4. Update registered decks selector
         self._registered_decks = self.inventory_service.get_all_decks()
         deck_names = [f"{d.name} ({d.format})" for d in self._registered_decks]
         self.cb_decks.configure(values=deck_names)

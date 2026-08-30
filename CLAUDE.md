@@ -45,7 +45,7 @@ The project supports two main execution modes:
    - **Splash Hub**: Quick-start dashboard with shortcuts and collection overview metrics.
    - **PDF Generator View**: MPCFill XML and Direct Game Deck to PDF pipeline with size-based chunking.
    - **Card Validator View**: Moxfield / Scryfall quality & legality validator with hover previews.
-   - **Card Inventory & Deck Binder View**: ManaBox CSV import (Merge/Replace), collection search, Moxfield missing proxy generator, and live image tooltips.
+   - **Card Inventory & Deck Binder View**: ManaBox CSV import (Merge/Replace), collection search, advanced collapsible filters (usage state, dynamic sets, rarity), interactive column sorting (▲/▼), card-to-decks usage modal (`CardDecksUsageDialog`), exact vs alternative (`oracle_id`) deck stock synchronization, Moxfield missing proxy generator, and live image tooltips.
    - **Settings View**: Global application configuration.
 
 ## Project structure
@@ -56,9 +56,9 @@ MPCFillToPDF/
 │   ├── engine/                # Concurrency & background task orchestration (TaskManager, events)
 │   ├── inventory/             # Card collection & deck binder domain (SQLite, ManaBox CSV, proxy solver)
 │   │   ├── db.py              # SQLite schema, migrations, and connection management
-│   │   ├── models.py          # Data models (InventoryCard, DeckRecord, DeckCardEntry, MissingProxyPlan)
+│   │   ├── models.py          # Data models (InventoryCard, DeckRecord, DeckCardEntry, DeckCardMatchDetail, MissingProxyPlan)
 │   │   ├── manabox_csv.py     # ManaBox CSV parser with Replace and Merge support
-│   │   └── service.py         # Inventory operations, deck sync, missing proxy calculation
+│   │   └── service.py         # Inventory operations, deck sync, exact vs alt stock matching, missing proxy calculation
 │   ├── parser.py              # XML parsing → structured card data
 │   ├── downloader.py          # Google Drive & Scryfall image download
 │   ├── cropper.py             # Bleed removal (Pillow)
@@ -83,7 +83,7 @@ MPCFillToPDF/
 │   └── procesamiento/         # Download cache, previews/, intermediate files
 ├── docs/                      # Architectural reviews, ADRs, and implementation plans
 │   └── adr/                   # Architecture Decision Records
-└── tests/                     # Unit and integration test suites
+└── tests/                     # Unit and integration test suites (648+ tests)
 ```
 
 ### Environment management (uv)

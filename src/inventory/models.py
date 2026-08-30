@@ -67,3 +67,19 @@ class MissingProxyPlan:
     total_required: int = 0
     total_owned: int = 0
     total_missing: int = 0
+
+
+@dataclass
+class DeckCardMatchDetail:
+    """Detailed matching result for a single card in a deck against inventory stock."""
+
+    name: str
+    set_code: str
+    collector_number: str
+    quantity_required: int
+    exact_stock: int = 0
+    alt_stock: int = 0
+    status: str = "missing"  # "exact", "alternative", "partial", "missing"
+    oracle_id: str = ""
+    deck_card_id: int | None = None
+

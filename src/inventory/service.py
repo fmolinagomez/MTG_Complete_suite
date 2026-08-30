@@ -7,7 +7,13 @@ from pathlib import Path
 
 from src.inventory.db import DEFAULT_DB_PATH, get_db, init_db
 from src.inventory.manabox_csv import import_parsed_cards, parse_manabox_csv
-from src.inventory.models import DeckCardEntry, DeckRecord, InventoryCard, MissingProxyPlan
+from src.inventory.models import (
+    DeckCardEntry,
+    DeckCardMatchDetail,
+    DeckRecord,
+    InventoryCard,
+    MissingProxyPlan,
+)
 
 
 class InventoryService:
@@ -539,3 +545,340 @@ class InventoryService:
             "physical_count": int(physical_count),
             "deck_count": int(deck_count),
         }
+
+    def get_unique_set_codes(self) -> list[str]:
+        """Fetch a sorted list of distinct non-empty set codes in uppercase from the inventory."""
+        with get_db(self.db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT UPPER(set_code) AS sc
+                FROM inventory_cards
+                WHERE set_code IS NOT NULL AND TRIM(set_code) != ''
+                ORDER BY sc ASC
+                """
+            ).fetchall()
+        return [row["sc"] for row in rows if row["sc"]]
+
+    def get_card_deck_usages(self, oracle_id: str = "", card_name: str = "") -> list[dict]:
+        """Find all deck usages for a card matching oracle_id or card_name."""
+        oid = oracle_id.strip()
+        cname = card_name.strip()
+        if not oid and not cname:
+            return []
+
+        clauses: list[str] = []
+        params: list[object] = []
+
+        if oid and cname:
+            clauses.append("(dc.oracle_id = ? OR LOWER(dc.name) = LOWER(?))")
+            params.extend([oid, cname])
+        elif oid:
+            clauses.append("dc.oracle_id = ?")
+            params.append(oid)
+        elif cname:
+            clauses.append("LOWER(dc.name) = LOWER(?)")
+            params.append(cname)
+
+        sql = f"""
+            SELECT d.id AS deck_id, d.name AS deck_name, d.format AS format,
+                   dc.quantity_required, dc.set_code, dc.collector_number, dc.is_proxy
+            FROM deck_cards dc
+            JOIN decks d ON d.id = dc.deck_id
+            WHERE {" AND ".join(clauses)}
+            ORDER BY d.name ASC, dc.id ASC
+        """
+
+        with get_db(self.db_path) as conn:
+            rows = conn.execute(sql, params).fetchall()
+
+        return [
+            {
+                "deck_id": row["deck_id"],
+                "deck_name": row["deck_name"],
+                "format": row["format"],
+                "quantity_required": int(row["quantity_required"]),
+                "set_code": row["set_code"],
+                "collector_number": row["collector_number"],
+                "is_proxy": bool(row["is_proxy"]),
+            }
+            for row in rows
+        ]
+
+    def get_inventory_cards_with_usage(
+        self,
+        query: str = "",
+        filter_proxy: bool | None = None,
+        filter_usage: str = "all",
+        filter_set: str = "",
+        filter_rarity: str = "",
+    ) -> list[tuple[InventoryCard, int, int]]:
+        """Fetch inventory cards along with dynamic in-deck usage and available quantity."""
+        all_cards = self.get_inventory_cards()
+
+        with get_db(self.db_path) as conn:
+            deck_card_rows = conn.execute(
+                """
+                SELECT id, deck_id, oracle_id, name, set_code, collector_number,
+                       quantity_required, is_proxy
+                FROM deck_cards
+                ORDER BY id ASC
+                """
+            ).fetchall()
+
+        usage_by_card_id: dict[int, int] = {card.id: 0 for card in all_cards if card.id is not None}
+        avail_by_card_id: dict[int, int] = {card.id: card.quantity for card in all_cards if card.id is not None}
+
+        for dc in deck_card_rows:
+            dc_qty = int(dc["quantity_required"])
+            dc_proxy = bool(dc["is_proxy"])
+            dc_sc = (dc["set_code"] or "").strip().lower()
+            dc_num = (dc["collector_number"] or "").strip().lower()
+            dc_oid = (dc["oracle_id"] or "").strip()
+            dc_name = (dc["name"] or "").strip().lower()
+
+            # First pass: exact print match
+            for card in all_cards:
+                if dc_qty <= 0:
+                    break
+                if card.id is None or card.is_proxy != dc_proxy:
+                    continue
+                c_sc = card.set_code.strip().lower()
+                c_num = card.collector_number.strip().lower()
+                if c_sc == dc_sc and c_num == dc_num:
+                    avail = avail_by_card_id[card.id]
+                    if avail > 0:
+                        take = min(dc_qty, avail)
+                        avail_by_card_id[card.id] -= take
+                        usage_by_card_id[card.id] += take
+                        dc_qty -= take
+
+            # Second pass: alt print match
+            if dc_qty > 0:
+                for card in all_cards:
+                    if dc_qty <= 0:
+                        break
+                    if card.id is None or card.is_proxy != dc_proxy:
+                        continue
+                    matches = (dc_oid and card.oracle_id.strip() == dc_oid) or (
+                        dc_name and card.name.strip().lower() == dc_name
+                    )
+                    if matches:
+                        avail = avail_by_card_id[card.id]
+                        if avail > 0:
+                            take = min(dc_qty, avail)
+                            avail_by_card_id[card.id] -= take
+                            usage_by_card_id[card.id] += take
+                            dc_qty -= take
+
+        results: list[tuple[InventoryCard, int, int]] = []
+        clean_query = query.strip().lower()
+        clean_set = filter_set.strip().lower()
+        clean_rarity = filter_rarity.strip().lower()
+
+        for card in all_cards:
+            card_id = card.id
+            in_decks_qty = usage_by_card_id.get(card_id, 0) if card_id is not None else 0
+            available_qty = max(0, card.quantity - in_decks_qty)
+
+            if filter_proxy is not None and card.is_proxy != filter_proxy:
+                continue
+
+            if clean_query:
+                q_matches = (
+                    clean_query in card.name.lower()
+                    or clean_query in card.set_code.lower()
+                    or clean_query in card.oracle_id.lower()
+                    or clean_query in card.collector_number.lower()
+                )
+                if not q_matches:
+                    continue
+
+            if clean_set and card.set_code.strip().lower() != clean_set:
+                continue
+
+            if clean_rarity:
+                card_rarity = str(card.metadata.get("rarity", "")).strip().lower()
+                if card_rarity != clean_rarity:
+                    continue
+
+            if filter_usage == "available" and available_qty <= 0:
+                continue
+            if filter_usage == "in_decks" and in_decks_qty <= 0:
+                continue
+
+            results.append((card, in_decks_qty, available_qty))
+
+        return results
+
+    def analyze_deck_card_matches(
+        self,
+        deck_cards: list[DeckCardEntry],
+        current_deck_id: int | None = None,
+    ) -> tuple[list[DeckCardMatchDetail], int, int, int]:
+        """Analyze physical card matches for deck cards respecting Option C stock allocation."""
+        if not deck_cards:
+            return [], 0, 0, 0
+
+        with get_db(self.db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT id, oracle_id, name, set_code, collector_number, quantity
+                FROM inventory_cards
+                WHERE is_proxy = 0 AND quantity > 0
+                """
+            ).fetchall()
+
+            stock_pool = [
+                {
+                    "id": row["id"],
+                    "oracle_id": (row["oracle_id"] or "").strip(),
+                    "name": (row["name"] or "").strip(),
+                    "set_code": (row["set_code"] or "").strip().lower(),
+                    "collector_number": (row["collector_number"] or "").strip().lower(),
+                    "quantity": int(row["quantity"]),
+                }
+                for row in rows
+            ]
+
+            # Deduct physical cards allocated to other registered decks
+            deck_filter_sql = "WHERE is_proxy = 0"
+            deck_params: list[object] = []
+            if current_deck_id is not None:
+                deck_filter_sql += " AND deck_id != ?"
+                deck_params.append(current_deck_id)
+
+            other_deck_cards = conn.execute(
+                f"""
+                SELECT oracle_id, name, set_code, collector_number, quantity_required
+                FROM deck_cards
+                {deck_filter_sql}
+                ORDER BY id ASC
+                """,
+                deck_params,
+            ).fetchall()
+
+            for assigned in other_deck_cards:
+                qty_to_deduct = int(assigned["quantity_required"])
+                assigned_sc = (assigned["set_code"] or "").strip().lower()
+                assigned_num = (assigned["collector_number"] or "").strip().lower()
+                assigned_oid = (assigned["oracle_id"] or "").strip()
+                assigned_name = (assigned["name"] or "").strip().lower()
+
+                # Exact match deduction first
+                for item in stock_pool:
+                    if qty_to_deduct <= 0:
+                        break
+                    if item["quantity"] > 0 and item["set_code"] == assigned_sc and item["collector_number"] == assigned_num:
+                        take = min(qty_to_deduct, item["quantity"])
+                        item["quantity"] -= take
+                        qty_to_deduct -= take
+
+                # Alt match deduction
+                if qty_to_deduct > 0:
+                    for item in stock_pool:
+                        if qty_to_deduct <= 0:
+                            break
+                        if item["quantity"] > 0:
+                            matches = (assigned_oid and item["oracle_id"] == assigned_oid) or (
+                                assigned_name and item["name"].lower() == assigned_name
+                            )
+                            if matches:
+                                take = min(qty_to_deduct, item["quantity"])
+                                item["quantity"] -= take
+                                qty_to_deduct -= take
+
+        details_list: list[DeckCardMatchDetail] = []
+        total_exact = 0
+        total_alt = 0
+        total_missing = 0
+
+        for entry in deck_cards:
+            needed = entry.quantity_required
+            entry_sc = entry.set_code.strip().lower()
+            entry_num = entry.collector_number.strip().lower()
+            entry_oid = entry.oracle_id.strip()
+            entry_name = entry.name.strip().lower()
+
+            exact_stock = 0
+            alt_stock = 0
+
+            for item in stock_pool:
+                if item["quantity"] <= 0:
+                    continue
+                matches_card = (entry_oid and item["oracle_id"] == entry_oid) or (
+                    entry_name and item["name"].lower() == entry_name
+                )
+                if not matches_card:
+                    continue
+                if item["set_code"] == entry_sc and item["collector_number"] == entry_num:
+                    exact_stock += item["quantity"]
+                else:
+                    alt_stock += item["quantity"]
+
+            if exact_stock >= needed:
+                status = "exact"
+            elif (exact_stock + alt_stock) >= needed and exact_stock == 0:
+                status = "alternative"
+            elif (exact_stock + alt_stock) > 0:
+                status = "partial"
+            else:
+                status = "missing"
+
+            exact_fulfilled = min(needed, exact_stock)
+            rem_needed = needed - exact_fulfilled
+            alt_fulfilled = min(rem_needed, alt_stock)
+            missing = rem_needed - alt_fulfilled
+
+            # Deduct allocated stock from pool
+            deduct_exact = exact_fulfilled
+            if deduct_exact > 0:
+                for item in stock_pool:
+                    if deduct_exact <= 0:
+                        break
+                    matches_card = (entry_oid and item["oracle_id"] == entry_oid) or (
+                        entry_name and item["name"].lower() == entry_name
+                    )
+                    if (
+                        matches_card
+                        and item["set_code"] == entry_sc
+                        and item["collector_number"] == entry_num
+                        and item["quantity"] > 0
+                    ):
+                        take = min(deduct_exact, item["quantity"])
+                        item["quantity"] -= take
+                        deduct_exact -= take
+
+            deduct_alt = alt_fulfilled
+            if deduct_alt > 0:
+                for item in stock_pool:
+                    if deduct_alt <= 0:
+                        break
+                    matches_card = (entry_oid and item["oracle_id"] == entry_oid) or (
+                        entry_name and item["name"].lower() == entry_name
+                    )
+                    is_exact = item["set_code"] == entry_sc and item["collector_number"] == entry_num
+                    if matches_card and not is_exact and item["quantity"] > 0:
+                        take = min(deduct_alt, item["quantity"])
+                        item["quantity"] -= take
+                        deduct_alt -= take
+
+            details_list.append(
+                DeckCardMatchDetail(
+                    name=entry.name,
+                    set_code=entry.set_code,
+                    collector_number=entry.collector_number,
+                    quantity_required=entry.quantity_required,
+                    exact_stock=exact_stock,
+                    alt_stock=alt_stock,
+                    status=status,
+                    oracle_id=entry.oracle_id,
+                    deck_card_id=entry.id,
+                )
+            )
+
+            total_exact += exact_fulfilled
+            total_alt += alt_fulfilled
+            total_missing += missing
+
+        return details_list, total_exact, total_alt, total_missing
+

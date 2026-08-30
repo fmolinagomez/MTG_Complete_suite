@@ -72,15 +72,26 @@ Tracks both `owned_quantity` and `assigned_quantity` across registered decks:
 - Physical cards can be allocated to specific decks.
 - If a card is required by multiple decks, the system calculates whether enough physical copies exist or marks the overflow as "Missing Proxies" to be printed.
 
-### Missing Proxy Calculator (Calculador de Proxies Faltantes)
-When analyzing an imported Moxfield deck against the local inventory:
+### Missing Proxy Calculator & Deck Synchronization (Sincronización de Mazos y Proxies)
+When analyzing an imported deck against the local inventory:
 1. Compares deck cards against available physical stock.
-2. Identifies missing cards / quantities.
+2. Differentiates between:
+   - **Exact Match (Stock Exacto)**: Matching `set_code` and `collector_number` available in collection.
+   - **Alternative Print / Oracle Match (Stock Alternativo)**: Matching `oracle_id` or canonical name available in a different edition/art.
+   - **Missing (Faltante / Proxy)**: No physical copies available in inventory; needs printing.
 3. Automatically offers to generate a print-ready PDF containing **only the missing proxies**.
 4. Automatically registers the deck and marks the newly queued cards as printed proxies for that deck.
+
+### Card-to-Decks Usage Lookup (Consulta de Mazos por Carta)
+Double-clicking or selecting any card in the collection opens a modal dialog (`CardDecksUsageDialog`) that cross-references all registered decks to display where that card is being utilized, the deck format, required quantity, and printing version.
+
+### Advanced Collection Filtering & Smart Column Sorting (Filtros Avanzados y Ordenación)
+- **Filters**: State of usage (all, available/unassigned, in-decks), set code (dynamically populated from inventory), rarity, and finishes (foil/proxy).
+- **Sorting**: Column header toggle (▲/▼) with natural numeric sorting for quantities/numbers and case-insensitive alphabetical sorting for names/editions.
 
 ### Deck-to-Inventory Bulk Import (Volcado de Mazo a Inventario)
 A feature allowing the user to import all cards from any registered deck directly into the permanent inventory, tagging them explicitly as either physical copies or proxies.
 
 ### Database Persistence (`inventario.db`)
 Stored in SQLite at `MPCFillToPDF/inventario.db` (co-located with output and cache folders). Uses hybrid relational schema + JSON attributes for maximum query performance and extensible card metadata.
+

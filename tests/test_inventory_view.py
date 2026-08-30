@@ -10,6 +10,7 @@ import pytest
 
 from gui.views.inventory_view import (
     AddCardDialog,
+    CardDecksUsageDialog,
     DeckImportOptionDialog,
     InventoryView,
     ManaBoxImportDialog,
@@ -130,6 +131,52 @@ class TestInventoryDialogs:
         dlg3._on_cancel()
         assert dlg3.result is None
 
+    def test_card_decks_usage_dialog_with_usages(self, clean_root, inv_service):
+        card_id = inv_service.add_or_update_card(
+            InventoryCard(oracle_id="orc-1", name="Sol Ring", set_code="c21", collector_number="263", quantity=2)
+        )
+        card = inv_service.get_card_by_id(card_id)
+        assert card is not None
+
+        inv_service.register_deck(
+            DeckRecord(name="EDH Artifacts", format="Commander"),
+            [
+                DeckCardEntry(
+                    deck_id=0,
+                    oracle_id="orc-1",
+                    name="Sol Ring",
+                    set_code="c21",
+                    collector_number="263",
+                    quantity_required=1,
+                    is_proxy=False,
+                ),
+            ],
+        )
+
+        dlg = CardDecksUsageDialog(clean_root, card, inv_service, in_decks=1, available=1)
+        assert dlg.lbl_empty is None
+        assert dlg.usage_tree is not None
+
+        children = dlg.usage_tree.get_children()
+        assert len(children) == 1
+        vals = dlg.usage_tree.item(children[0])["values"]
+        assert vals[0] == "EDH Artifacts"
+        assert vals[1] == "Commander"
+        assert vals[2] == 1
+        assert "C21 #263" in vals[3]
+        assert vals[4] == "Física"
+
+        dlg.destroy()
+
+    def test_card_decks_usage_dialog_empty_usages(self, clean_root, inv_service):
+        card = InventoryCard(oracle_id="orc-unused", name="Unused Card", set_code="mh2", collector_number="10", quantity=1)
+        dlg = CardDecksUsageDialog(clean_root, card, inv_service)
+        assert dlg.lbl_empty is not None
+        assert "Esta carta no está asignada a ningún mazo" in dlg.lbl_empty.cget("text")
+        assert dlg.usage_tree is None
+
+        dlg.destroy()
+
 
 # ---------------------------------------------------------------------------
 # Test InventoryView
@@ -246,6 +293,182 @@ class TestInventoryView:
 
         view.destroy()
 
+    def test_double_click_and_view_decks_opens_usage_dialog(self, clean_root, inv_service, task_manager):
+        inv_service.add_or_update_card(
+            InventoryCard(oracle_id="orc-1", name="Sol Ring", set_code="c21", collector_number="263", quantity=1)
+        )
+        view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
+        view.pack()
+
+        children = view.inv_tree.get_children()
+        assert len(children) == 1
+        view.inv_tree.selection_set(children[0])
+
+        with patch.object(view, "wait_window") as mock_wait:
+            view._on_card_double_click()
+            mock_wait.assert_called_once()
+            dlg = mock_wait.call_args[0][0]
+            assert isinstance(dlg, CardDecksUsageDialog)
+            assert dlg.card.name == "Sol Ring"
+            dlg.destroy()
+
+        with patch.object(view, "wait_window") as mock_wait2:
+            view._on_view_card_decks_click()
+            mock_wait2.assert_called_once()
+            dlg2 = mock_wait2.call_args[0][0]
+            assert isinstance(dlg2, CardDecksUsageDialog)
+            dlg2.destroy()
+
+        view.destroy()
+
+    def test_advanced_filters_toggle_and_reset(self, clean_root, inv_service, task_manager):
+        inv_service.add_or_update_card(
+            InventoryCard(oracle_id="1", name="Sol Ring", set_code="c21", collector_number="263", quantity=2)
+        )
+        view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
+        view.pack()
+
+        assert not view._adv_filters_visible
+        assert "🔽" in view.btn_toggle_filters.cget("text")
+
+        # Toggle open
+        view._toggle_advanced_filters()
+        assert view._adv_filters_visible
+        assert "🔼" in view.btn_toggle_filters.cget("text")
+
+        # Toggle closed
+        view._toggle_advanced_filters()
+        assert not view._adv_filters_visible
+        assert "🔽" in view.btn_toggle_filters.cget("text")
+
+        # Test reset filters
+        view._search_var.set("Sol")
+        view._filter_type_var.set("Solo Reales")
+        view._filter_usage_var.set("Solo Asignadas a Mazos")
+        view._filter_set_var.set("C21")
+        view._filter_rarity_var.set("Rara")
+
+        view._on_reset_filters_click()
+
+        assert view._search_var.get() == ""
+        assert view._filter_type_var.get() == "Todas"
+        assert view._filter_usage_var.get() == "Todas"
+        assert view._filter_set_var.get() == "Todas las ediciones"
+        assert view._filter_rarity_var.get() == "Todas"
+
+        view.destroy()
+
+    def test_advanced_filters_by_usage(self, clean_root, inv_service, task_manager):
+        # Card 1 assigned to a deck
+        inv_service.add_or_update_card(
+            InventoryCard(oracle_id="orc-assigned", name="Arcane Signet", set_code="eld", collector_number="331", quantity=1)
+        )
+        inv_service.register_deck(
+            DeckRecord(name="Test Deck"),
+            [
+                DeckCardEntry(
+                    deck_id=0,
+                    oracle_id="orc-assigned",
+                    name="Arcane Signet",
+                    set_code="eld",
+                    collector_number="331",
+                    quantity_required=1,
+                )
+            ],
+        )
+
+        # Card 2 free
+        inv_service.add_or_update_card(
+            InventoryCard(oracle_id="orc-free", name="Free Spell", set_code="eld", collector_number="332", quantity=2)
+        )
+
+        view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
+        view.pack()
+
+        # All
+        view._filter_usage_var.set("Todas")
+        view._filter_collection_table()
+        assert len(view.inv_tree.get_children()) == 2
+
+        # Solo Disponibles
+        view._filter_usage_var.set("Solo Disponibles (libres)")
+        view._filter_collection_table()
+        rows = view.inv_tree.get_children()
+        assert len(rows) == 1
+        assert view.inv_tree.item(rows[0])["values"][0] == "Free Spell"
+
+        # Solo Asignadas
+        view._filter_usage_var.set("Solo Asignadas a Mazos")
+        view._filter_collection_table()
+        rows = view.inv_tree.get_children()
+        assert len(rows) == 1
+        assert view.inv_tree.item(rows[0])["values"][0] == "Arcane Signet"
+
+        view.destroy()
+
+    def test_advanced_filters_by_set_and_rarity(self, clean_root, inv_service, task_manager):
+        inv_service.add_or_update_card(
+            InventoryCard(oracle_id="1", name="Black Lotus", set_code="lea", collector_number="232", quantity=1, metadata_json='{"rarity": "rare"}')
+        )
+        inv_service.add_or_update_card(
+            InventoryCard(oracle_id="2", name="Mox Diamond", set_code="tpr", collector_number="228", quantity=1, metadata_json='{"rarity": "mythic"}')
+        )
+        inv_service.add_or_update_card(
+            InventoryCard(oracle_id="3", name="Lightning Bolt", set_code="lea", collector_number="161", quantity=4, metadata_json='{"rarity": "common"}')
+        )
+
+        view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
+        view.pack()
+
+        # Filter by set LEA
+        view._filter_set_var.set("lea")
+        view._filter_collection_table()
+        assert len(view.inv_tree.get_children()) == 2
+
+        # Filter by rarity mythic
+        view._filter_set_var.set("Todas las ediciones")
+        view._filter_rarity_var.set("Mítica")
+        view._filter_collection_table()
+        rows = view.inv_tree.get_children()
+        assert len(rows) == 1
+        assert view.inv_tree.item(rows[0])["values"][0] == "Mox Diamond"
+
+        view.destroy()
+
+    def test_column_sorting_numeric_and_text(self, clean_root, inv_service, task_manager):
+        inv_service.add_or_update_card(
+            InventoryCard(oracle_id="1", name="Zendikar Resurgent", set_code="ogw", collector_number="147", quantity=10)
+        )
+        inv_service.add_or_update_card(
+            InventoryCard(oracle_id="2", name="Abrupt Decay", set_code="rtr", collector_number="142", quantity=2)
+        )
+        inv_service.add_or_update_card(
+            InventoryCard(oracle_id="3", name="Counterspell", set_code="ema", collector_number="43", quantity=5)
+        )
+
+        view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
+        view.pack()
+
+        # Sort by name ASC
+        view._sort_collection_by_column("name")
+        rows = [view.inv_tree.item(r)["values"][0] for r in view.inv_tree.get_children()]
+        assert rows == ["Abrupt Decay", "Counterspell", "Zendikar Resurgent"]
+        assert "▲" in view.inv_tree.heading("name")["text"]
+
+        # Sort by name DESC
+        view._sort_collection_by_column("name")
+        rows_desc = [view.inv_tree.item(r)["values"][0] for r in view.inv_tree.get_children()]
+        assert rows_desc == ["Zendikar Resurgent", "Counterspell", "Abrupt Decay"]
+        assert "▼" in view.inv_tree.heading("name")["text"]
+
+        # Sort by quantity ASC (numeric)
+        view._sort_collection_by_column("quantity")
+        qtys = [view.inv_tree.item(r)["values"][3] for r in view.inv_tree.get_children()]
+        assert qtys == [2, 5, 10]
+        assert "▲" in view.inv_tree.heading("quantity")["text"]
+
+        view.destroy()
+
     def test_manabox_csv_import_task_dispatch_and_callback(self, clean_root, inv_service, task_manager, tmp_path):
         csv_file = tmp_path / "manabox.csv"
         csv_file.write_text("dummy csv")
@@ -313,21 +536,23 @@ class TestInventoryView:
         rows = view.deck_tree.get_children()
         assert len(rows) == 2
 
-        # Sol Ring is owned (stock = 1, status = 🟢 Poseída)
+        # Sol Ring is owned (stock = 1, status = 🟢 Exacta)
         sol_row = [view.deck_tree.item(r)["values"] for r in rows if "Sol Ring" in view.deck_tree.item(r)["values"][0]][0]
         assert sol_row[3] == 1  # required
-        assert sol_row[4] == 1  # stock
-        assert "Poseída" in sol_row[5]
+        assert sol_row[4] == 1  # exact stock
+        assert sol_row[5] == 0  # alt stock
+        assert "Exacta" in sol_row[6]
 
         # Mana Vault is missing (stock = 0, status = 🔴 Faltante (Proxy))
         vault_row = [view.deck_tree.item(r)["values"] for r in rows if "Mana Vault" in view.deck_tree.item(r)["values"][0]][0]
         assert vault_row[3] == 1  # required
-        assert vault_row[4] == 0  # stock
-        assert "Faltante" in vault_row[5]
+        assert vault_row[4] == 0  # exact stock
+        assert vault_row[5] == 0  # alt stock
+        assert "Faltante" in vault_row[6]
 
         # Plan summary text
         assert "Requeridas: 2" in view.lbl_plan_summary.cget("text")
-        assert "Poseídas en Stock: 1" in view.lbl_plan_summary.cget("text")
+        assert "Stock Exacto: 1" in view.lbl_plan_summary.cget("text")
         assert "Faltantes (Proxies a Imprimir): 1" in view.lbl_plan_summary.cget("text")
 
         # Deck card preview info resolver
@@ -336,6 +561,67 @@ class TestInventoryView:
         assert preview_info is not None
         assert preview_info.name == "Mana Vault"
         assert preview_info.set_code == "uma"
+
+        view.destroy()
+
+    def test_deck_sync_breakdown_exact_and_alt_stock(self, clean_root, inv_service, task_manager):
+        # Stock: 1 Sol Ring (c21 #263), 1 Sol Ring (lea #269), 0 Mana Crypt
+        inv_service.add_or_update_card(
+            InventoryCard(oracle_id="orc-sol", name="Sol Ring", set_code="c21", collector_number="263", quantity=1, is_proxy=False)
+        )
+        inv_service.add_or_update_card(
+            InventoryCard(oracle_id="orc-sol", name="Sol Ring", set_code="lea", collector_number="269", quantity=1, is_proxy=False)
+        )
+
+        # Register deck requiring 1 exact c21 Sol Ring, 1 commander alt Sol Ring, and 1 Mana Crypt
+        deck_id = inv_service.register_deck(
+            DeckRecord(name="Sync Test Deck", format="Commander"),
+            [
+                DeckCardEntry(deck_id=0, oracle_id="orc-sol", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=1),
+                DeckCardEntry(deck_id=0, oracle_id="orc-sol", name="Sol Ring", set_code="cmd", collector_number="123", quantity_required=1),
+                DeckCardEntry(deck_id=0, oracle_id="orc-crypt", name="Mana Crypt", set_code="2xm", collector_number="270", quantity_required=1),
+            ],
+        )
+
+        view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
+        view.pack()
+        view._select_deck_by_id(deck_id)
+
+        rows = view.deck_tree.get_children()
+        assert len(rows) == 3
+
+        items = [view.deck_tree.item(r) for r in rows]
+
+        # Exact match
+        exact_item = [it for it in items if it["values"][1] == "C21"][0]
+        assert exact_item["values"][3] == 1  # required
+        assert exact_item["values"][4] == 1  # exact_stock
+        assert exact_item["values"][5] == 1  # alt_stock (1 other Sol Ring print in collection)
+        assert "Exacta" in exact_item["values"][6]
+        assert "owned" in exact_item["tags"]
+
+        # Alternative match
+        alt_item = [it for it in items if it["values"][1] == "CMD"][0]
+        assert alt_item["values"][3] == 1  # required
+        assert alt_item["values"][4] == 0  # exact_stock
+        assert alt_item["values"][5] == 1  # alt_stock
+        assert "Alternativa" in alt_item["values"][6]
+        assert "alt_stock" in alt_item["tags"]
+
+        # Missing
+        missing_item = [it for it in items if "Mana Crypt" in it["values"][0]][0]
+        assert missing_item["values"][3] == 1  # required
+        assert missing_item["values"][4] == 0  # exact_stock
+        assert missing_item["values"][5] == 0  # alt_stock
+        assert "Faltante" in missing_item["values"][6]
+        assert "missing" in missing_item["tags"]
+
+        # Summary text
+        summary = view.lbl_plan_summary.cget("text")
+        assert "Requeridas: 3" in summary
+        assert "Stock Exacto: 1" in summary
+        assert "Stock Alternativo: 1" in summary
+        assert "Faltantes (Proxies a Imprimir): 1" in summary
 
         view.destroy()
 
