@@ -1,5 +1,6 @@
 """Tests for src/scraper_utils.py."""
 
+import pytest
 from PIL import Image
 
 from src.scraper_utils import generate_fallback_back, sanitize_filename
@@ -151,4 +152,103 @@ class TestFetchUtilities:
                 resp = fetch_url("https://example.com/retry", retries=2, backoff_factor=0.01)
                 assert resp.status_code == 200
                 assert mock_sleep.called
+
+    def test_cache_ttl_expiry(self):
+        from unittest.mock import patch
+
+        from src.scraper_utils import ScraperCache
+
+        cache = ScraperCache(default_ttl=10.0)
+        with patch("time.monotonic", side_effect=[100.0, 105.0, 115.0]):
+            cache.set("k", "val")  # expiry at 110.0
+            assert cache.get("k") == "val"  # time=105 <= 110
+            assert cache.get("k") is None  # time=115 > 110 (expired and removed)
+
+    def test_get_global_cache(self):
+        from src.scraper_utils import ScraperCache, get_global_cache
+
+        gc = get_global_cache()
+        assert isinstance(gc, ScraperCache)
+
+    def test_fetch_url_retry_after_header(self):
+        from unittest.mock import MagicMock, patch
+
+        import requests
+
+        from src.scraper_utils import fetch_url
+
+        resp_429 = MagicMock()
+        resp_429.status_code = 429
+        resp_429.headers = {"Retry-After": "2"}
+
+        resp_200 = MagicMock()
+        resp_200.status_code = 200
+        resp_200.raise_for_status.return_value = None
+
+        with patch("requests.request", side_effect=[resp_429, resp_200]):
+            with patch("time.sleep") as mock_sleep:
+                resp = fetch_url("https://example.com/rate-limited", retries=1)
+                assert resp.status_code == 200
+                mock_sleep.assert_called_once_with(2.0)
+
+    def test_fetch_url_connection_error_and_timeout_exhaustion(self):
+        from unittest.mock import patch
+
+        import requests
+
+        from src.scraper_utils import fetch_url
+
+        with patch("requests.request", side_effect=requests.ConnectionError("Failed connection")):
+            with patch("time.sleep"):
+                with pytest.raises(requests.ConnectionError):
+                    fetch_url("https://example.com/conn-fail", retries=1, backoff_factor=0.001)
+
+        with patch("requests.request", side_effect=requests.Timeout("Timed out")):
+            with patch("time.sleep"):
+                with pytest.raises(requests.Timeout):
+                    fetch_url("https://example.com/timeout-fail", retries=1, backoff_factor=0.001)
+
+    def test_fetch_url_http_error_non_retryable_and_retryable(self):
+        from unittest.mock import MagicMock, patch
+
+        import requests
+
+        from src.scraper_utils import fetch_url
+
+        # 404 is not retryable -> raises HTTPError immediately
+        resp_404 = MagicMock()
+        resp_404.status_code = 404
+        err_404 = requests.HTTPError("Not found", response=resp_404)
+        resp_404.raise_for_status.side_effect = err_404
+
+        with patch("requests.request", return_value=resp_404):
+            with pytest.raises(requests.HTTPError):
+                fetch_url("https://example.com/not-found", retries=2)
+
+        # 500 is retryable -> retries then raises
+        resp_500 = MagicMock()
+        resp_500.status_code = 500
+        err_500 = requests.HTTPError("Server error", response=resp_500)
+        resp_500.raise_for_status.side_effect = err_500
+
+        with patch("requests.request", side_effect=err_500):
+            with patch("time.sleep"):
+                with pytest.raises(requests.HTTPError):
+                    fetch_url("https://example.com/server-error", retries=1, backoff_factor=0.001)
+
+    def test_resources_dir_frozen_and_dev(self, tmp_path):
+        import sys
+        from unittest.mock import patch
+        from pathlib import Path
+        from src.scraper_utils import resources_dir
+
+        # Dev mode
+        res_dev = resources_dir()
+        assert isinstance(res_dev, Path)
+
+        # Frozen mode (.exe)
+        with patch.object(sys, "frozen", True, create=True), patch.object(sys, "_MEIPASS", str(tmp_path), create=True):
+            res_frozen = resources_dir()
+            assert res_frozen == tmp_path / "resources"
+
 

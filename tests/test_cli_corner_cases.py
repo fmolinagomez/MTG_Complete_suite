@@ -377,3 +377,246 @@ def test_cli_keyboard_interrupt_in_test_mode_preserves_workdir(tmp_path):
             cli_main.main()
         assert exc.value.code == 130
         mock_cleanup.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# 6. Local backs validation & Error formatting
+# ---------------------------------------------------------------------------
+
+
+def test_cli_local_backs_without_fronts_exits(tmp_path, capsys):
+    back = make_rgb_image(tmp_path / "back.png")
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "cli",
+            f"--local-backs={back}",
+            f"--out-dir={tmp_path / 'out'}",
+            f"--workdir={tmp_path / 'work'}",
+        ],
+    ):
+        with pytest.raises(SystemExit) as exc:
+            cli_main.main()
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "--local-backs requiere --local-fronts" in err
+
+
+def test_cli_local_backs_more_than_fronts_exits(tmp_path, capsys):
+    front = make_rgb_image(tmp_path / "front.png")
+    back1 = make_rgb_image(tmp_path / "back1.png")
+    back2 = make_rgb_image(tmp_path / "back2.png")
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "cli",
+            "--local-fronts",
+            str(front),
+            "--local-backs",
+            str(back1),
+            str(back2),
+            f"--out-dir={tmp_path / 'out'}",
+            f"--workdir={tmp_path / 'work'}",
+        ],
+    ):
+        with pytest.raises(SystemExit) as exc:
+            cli_main.main()
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "hay 2 --local-backs pero solo 1 --local-fronts" in err
+
+
+def test_cli_download_permission_error_formatting(tmp_path, capsys):
+    from src.downloader import DownloadPermissionError
+
+    xml_dir = tmp_path / "xml"
+    xml_dir.mkdir()
+    valid_xml = xml_dir / "deck.xml"
+    valid_xml.write_text("<order></order>", encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    mock_report = MagicMock()
+    mock_report.path = valid_xml
+    mock_report.cards = 9
+    mock_report.has_blanks = False
+    mock_plan = MagicMock()
+    mock_plan.jobs = []
+
+    perm_err = DownloadPermissionError("did123", "Black Lotus")
+    perm_err.xml_name = "deck.xml"
+    perm_err.position = "Frente 1"
+
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "cli",
+            f"--xml-dir={xml_dir}",
+            f"--out-dir={out_dir}",
+            f"--workdir={tmp_path / 'work'}",
+            "--yes",
+        ],
+    ), patch("cli.main.analyze", return_value=[mock_report]), patch(
+        "cli.main.plan", return_value=mock_plan
+    ), patch(
+        "cli.main.collect_drive_ids", return_value=[]
+    ), patch(
+        "cli.main.run_plan", side_effect=perm_err
+    ):
+        with pytest.raises(SystemExit) as exc:
+            cli_main.main()
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "Black Lotus" in err
+        assert "deck.xml" in err
+        assert "Frente 1" in err
+
+
+def test_cli_download_timeout_error_formatting(tmp_path, capsys):
+    from src.downloader import DownloadTimeoutError
+
+    xml_dir = tmp_path / "xml"
+    xml_dir.mkdir()
+    valid_xml = xml_dir / "deck.xml"
+    valid_xml.write_text("<order></order>", encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    mock_report = MagicMock()
+    mock_report.path = valid_xml
+    mock_report.cards = 9
+    mock_report.has_blanks = False
+    mock_plan = MagicMock()
+    mock_plan.jobs = []
+
+    timeout_err = DownloadTimeoutError("did123", "Mox Pearl")
+    timeout_err.xml_name = "deck.xml"
+    timeout_err.position = "Frente 2"
+
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "cli",
+            f"--xml-dir={xml_dir}",
+            f"--out-dir={out_dir}",
+            f"--workdir={tmp_path / 'work'}",
+            "--yes",
+        ],
+    ), patch("cli.main.analyze", return_value=[mock_report]), patch(
+        "cli.main.plan", return_value=mock_plan
+    ), patch(
+        "cli.main.collect_drive_ids", return_value=[]
+    ), patch(
+        "cli.main.run_plan", side_effect=timeout_err
+    ):
+        with pytest.raises(SystemExit) as exc:
+            cli_main.main()
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "Mox Pearl" in err
+        assert "tiempo agotado" in err
+
+
+def test_cli_drive_access_inaccessible_prompt_cancelled_and_accepted(tmp_path, capsys):
+    xml_dir = tmp_path / "xml"
+    xml_dir.mkdir()
+    valid_xml = xml_dir / "deck.xml"
+    valid_xml.write_text("<order></order>", encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    mock_report = MagicMock()
+    mock_report.path = valid_xml
+    mock_report.cards = 9
+    mock_report.has_blanks = False
+    mock_plan = MagicMock()
+    mock_plan.jobs = []
+
+    inaccessible = [("id1", "Inaccessible Card")]
+
+    # 1. Prompt cancelled ('n')
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "cli",
+            f"--xml-dir={xml_dir}",
+            f"--out-dir={out_dir}",
+            f"--workdir={tmp_path / 'work'}",
+        ],
+    ), patch("cli.main.analyze", return_value=[mock_report]), patch(
+        "cli.main.collect_drive_ids", return_value=[("id1", "Inaccessible Card")]
+    ), patch(
+        "cli.main.check_drive_access", return_value=inaccessible
+    ), patch(
+        "builtins.input", return_value="n"
+    ):
+        cli_main.main()
+        out = capsys.readouterr().out
+        assert "Cancelado" in out
+
+    # 2. Prompt accepted ('s')
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "cli",
+            f"--xml-dir={xml_dir}",
+            f"--out-dir={out_dir}",
+            f"--workdir={tmp_path / 'work'}",
+        ],
+    ), patch("cli.main.analyze", return_value=[mock_report]), patch(
+        "cli.main.collect_drive_ids", return_value=[("id1", "Inaccessible Card")]
+    ), patch(
+        "cli.main.check_drive_access", return_value=inaccessible
+    ), patch(
+        "cli.main.plan", return_value=mock_plan
+    ), patch(
+        "builtins.input", return_value="s"
+    ), patch(
+        "cli.main.run_plan", return_value=[out_dir / "deck.pdf"]
+    ), patch(
+        "cli.main.write_manifest", return_value=None
+    ):
+        cli_main.main()
+        out = capsys.readouterr().out
+        assert "Inaccessible Card" in out
+
+
+def test_cli_format_warning_prompt_cancelled(tmp_path, capsys):
+    xml_dir = tmp_path / "xml"
+    xml_dir.mkdir()
+    valid_xml = xml_dir / "deck.xml"
+    valid_xml.write_text("<order></order>", encoding="utf-8")
+    out_dir = tmp_path / "out"
+
+    mock_report = MagicMock()
+    mock_report.path = valid_xml
+    mock_report.cards = 8  # Not multiple of 9
+    mock_report.has_blanks = True
+    mock_plan = MagicMock()
+    mock_plan.jobs = []
+
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "cli",
+            f"--xml-dir={xml_dir}",
+            f"--out-dir={out_dir}",
+            f"--workdir={tmp_path / 'work'}",
+        ],
+    ), patch("cli.main.analyze", return_value=[mock_report]), patch(
+        "cli.main.collect_drive_ids", return_value=[]
+    ), patch(
+        "cli.main.plan", return_value=mock_plan
+    ), patch(
+        "cli.main.format_warning", return_value="Aviso: cartas no múltiplo de 9"
+    ), patch(
+        "builtins.input", return_value="n"
+    ):
+        cli_main.main()
+        out = capsys.readouterr().out
+        assert "Cancelado" in out
+

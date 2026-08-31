@@ -225,3 +225,52 @@ class TestBulkDeckDownloadsMixedResponses:
         with patch("src.scryfall.download_card_images", side_effect=mock_download):
             with pytest.raises(ScryfallError, match="Carta no encontrada"):
                 download_deck_images(cards, tmp_path)
+
+    def test_throttled_get_connection_error_and_timeout_exhaustion(self):
+        with patch("requests.get", side_effect=requests.ConnectionError("Connection lost")):
+            with patch("time.sleep"):
+                with pytest.raises(requests.ConnectionError):
+                    _throttled_get("https://api.scryfall.com/fail")
+
+    def test_extract_images_missing_front_in_dict_raises(self):
+        with pytest.raises(ScryfallError, match="No se encontró imagen de frente"):
+            _extract_images({"image_uris": {"small": ""}}, "large")
+
+    def test_fetch_card_language_and_english_both_fail_raises(self):
+        resp_404 = _mock_resp(status=404)
+        with patch("src.scryfall._throttled_get", return_value=resp_404):
+            with pytest.raises(ScryfallError, match="Error al descargar versión en inglés"):
+                fetch_card("m11", "149", lang="es")
+
+    def test_download_deck_images_cancel_and_progress_callback(self, tmp_path):
+        import threading
+        from src.cancellation import Cancelled
+
+        cards = [DeckCard("Card 1", "m21", "1", 1, "main")]
+        cancel_ev = threading.Event()
+        cancel_ev.set()
+
+        with patch("src.scryfall.download_card_images", return_value=(tmp_path / "1.jpg", None)):
+            with pytest.raises(Cancelled):
+                download_deck_images(cards, tmp_path, cancel_event=cancel_ev)
+
+        progress_mock = MagicMock()
+        with patch("src.scryfall.download_card_images", return_value=(tmp_path / "1.jpg", None)):
+            res = download_deck_images(cards, tmp_path, progress_cb=progress_mock)
+            assert len(res) == 1
+            progress_mock.assert_called_once_with(1, 1)
+
+    def test_download_card_images_quality_fallback_failure_handling(self, tmp_path):
+        card = DeckCard("Spanish Card", "m21", "1", 1, "main")
+        fake_scryfall = ScryfallCard("https://cards.scryfall.io/large/front/0/0/front.jpg", None)
+
+        with (
+            patch("src.scryfall.fetch_card", side_effect=[fake_scryfall, Exception("English fallback failed")]),
+            patch("src.scryfall._throttled_get", return_value=_mock_resp(content=b"IMG")),
+            patch("src.scryfall.check_image_quality", return_value=(False, 10.0, (100, 100))),
+        ):
+            f, b = download_card_images(card, tmp_path, lang="es", quality_check=True)
+            assert f.exists()
+            assert b is None
+
+

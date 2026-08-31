@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Architecture Review — MPCFillToPDF</title>
+    <title>Architecture review — MPCFillToPDF</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="module">
       import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
@@ -11,38 +11,24 @@
     <style>
       .seam { stroke-dasharray: 4 4; }
       .leak { stroke: #dc2626; }
-      .deep-card { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .deep-card { background: linear-gradient(135deg, #0f172a, #1e293b); color: #f8fafc; }
+      .shallow-card { background: #f8fafc; border: 1px solid #cbd5e1; }
     </style>
   </head>
   <body class="bg-stone-50 text-slate-900 font-sans antialiased">
     <main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
-
-      <!-- Header -->
-      <header class="border-b border-slate-200 pb-6">
-        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <h1 class="text-3xl font-serif font-bold tracking-tight text-slate-900">Architecture Review</h1>
-            <p class="text-sm font-mono text-slate-500 mt-1">Repository: MPCFillToPDF &bull; August 2026</p>
-          </div>
-          <!-- Legend -->
-          <div class="flex flex-wrap items-center gap-4 text-xs font-mono bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
-            <div class="flex items-center gap-1.5">
-              <span class="w-3.5 h-3.5 rounded border border-slate-400 bg-slate-100 inline-block"></span>
-              <span>Module</span>
-            </div>
-            <div class="flex items-center gap-1.5">
-              <span class="w-3.5 h-3.5 rounded border border-dashed border-indigo-500 bg-indigo-50 inline-block"></span>
-              <span>Seam</span>
-            </div>
-            <div class="flex items-center gap-1.5">
-              <span class="w-3.5 h-3.5 rounded bg-slate-900 inline-block"></span>
-              <span>Deep Module</span>
-            </div>
-            <div class="flex items-center gap-1.5">
-              <span class="w-3 h-0.5 bg-red-600 inline-block"></span>
-              <span>Leakage</span>
-            </div>
-          </div>
+      <!-- Header & Legend -->
+      <header class="border-b border-stone-200 pb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 class="text-3xl font-serif font-bold text-slate-900">Architecture Review — MPCFillToPDF</h1>
+          <p class="text-sm text-slate-500 mt-1">Date: 31 August 2026 · Context: <span class="font-mono text-xs text-slate-700 bg-stone-200 px-1.5 py-0.5 rounded">CONTEXT.md</span></p>
+        </div>
+        <div class="flex flex-wrap items-center gap-3 text-xs text-slate-600 bg-white p-3 rounded-lg border border-stone-200 shadow-sm">
+          <span class="font-semibold text-slate-800">Legend:</span>
+          <span class="inline-flex items-center gap-1.5"><span class="w-3.5 h-3.5 rounded border border-slate-400 bg-slate-100"></span> Module</span>
+          <span class="inline-flex items-center gap-1.5"><span class="w-3.5 h-3.5 rounded border border-dashed border-indigo-500 bg-indigo-50"></span> Seam</span>
+          <span class="inline-flex items-center gap-1.5"><span class="w-3.5 h-3.5 rounded bg-slate-900"></span> Deep Module</span>
+          <span class="inline-flex items-center gap-1.5"><span class="w-3.5 h-1 bg-red-500 rounded"></span> Leakage</span>
         </div>
       </header>
 
@@ -50,393 +36,384 @@
       <section id="candidates" class="space-y-12">
 
         <!-- Candidate 1 -->
-        <article id="candidate-1" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden p-6 md:p-8 space-y-6">
-          <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3 border-b border-slate-100 pb-4">
-            <div>
-              <span class="text-xs uppercase tracking-wider font-mono text-slate-400">Candidate 01</span>
-              <h2 class="text-2xl font-serif font-semibold text-slate-900 mt-0.5">Consolidate External Game Deck Scrapers into a Deep Deck Intake Module</h2>
-            </div>
+        <article id="candidate-1" class="bg-white rounded-xl border border-stone-200 p-6 shadow-sm space-y-6">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <h2 class="text-xl font-serif font-bold text-slate-900">1. Collapse GUI Execution Monolith into a Deep Print Job Engine</h2>
             <div class="flex items-center gap-2">
-              <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">Strong</span>
-              <span class="px-2.5 py-1 text-xs font-mono rounded-full bg-slate-100 text-slate-700 border border-slate-200">ports &amp; adapters</span>
+              <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800">Strong</span>
+              <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-100 text-slate-700 font-mono">in-process</span>
             </div>
           </div>
 
-          <div class="text-xs font-mono text-slate-600 bg-slate-50 p-2.5 rounded border border-slate-200">
-            <strong>Files:</strong> src/lorcana_scraper.py &bull; src/op_scraper.py &bull; src/rb_scraper.py &bull; src/deck_importer.py &bull; src/scryfall.py &bull; gui/main.py
+          <div class="text-xs font-mono text-slate-600 bg-stone-50 p-2.5 rounded border border-stone-200 space-y-1">
+            <div><span class="text-slate-400 font-sans">Files: </span>gui/views/generator_view.py, gui/views/inventory_view.py, src/pipeline.py, src/engine/task_manager.py</div>
           </div>
 
-          <!-- Problem & Solution -->
-          <div class="grid md:grid-cols-2 gap-4 text-sm">
-            <div class="p-4 rounded-lg bg-red-50/50 border border-red-100">
-              <p class="font-semibold text-red-900 text-xs uppercase tracking-wider mb-1">Problem</p>
-              <p class="text-slate-800">Four separate game scrapers duplicate downloading loops, thread pools, card expansion, and fallback back generation across shallow modules.</p>
-            </div>
-            <div class="p-4 rounded-lg bg-emerald-50/50 border border-emerald-100">
-              <p class="font-semibold text-emerald-900 text-xs uppercase tracking-wider mb-1">Solution</p>
-              <p class="text-slate-800">Unify game ingestion behind a single deep Deck Intake module with per-game parser adapters returning a canonical Deck model.</p>
-            </div>
-          </div>
-
-          <!-- Before / After Diagram -->
-          <div class="grid md:grid-cols-2 gap-6">
-            <div class="space-y-2">
-              <span class="text-xs font-mono font-semibold uppercase tracking-wider text-slate-500">Before: Fragmented Shallow Pipelines</span>
-              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 min-h-[300px] flex items-center justify-center">
-                <pre class="mermaid">
-                  flowchart TD
-                    subgraph UI ["GUI / Mixins"]
-                      G1["LorcanaTab"]
-                      G2["OPTab"]
-                      G3["RBTab"]
-                      G4["MTGTab"]
-                    end
-                    G1 --> L["lorcana_scraper\n(Fetch + DL + Expand)"]
-                    G2 --> O["op_scraper\n(Fetch + DL + Expand)"]
-                    G3 --> R["rb_scraper\n(Fetch + DL + Expand)"]
-                    G4 --> M["deck_importer + scryfall\n(Fetch + DL + Expand)"]
-                    L -.leak.-> P["pipeline (run_locals_only)"]
-                    O -.leak.-> P
-                    R -.leak.-> P
-                    M -.leak.-> P
-                    classDef leak stroke:#dc2626,stroke-width:2px;
-                    class L,O,R,M leak;
-                </pre>
-              </div>
+          <!-- Side-by-side Before / After Diagram -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 flex flex-col justify-between">
+              <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Before: Shallow GUI Execution Monolith</div>
+              <pre class="mermaid">
+flowchart TD
+  subgraph GUI ["GeneratorView (_work: 600 LOC)"]
+    G1[MTG / Scryfall Loop]
+    G2[One Piece Loop]
+    G3[Riftbound Loop]
+    G4[Lorcana Loop]
+    G5[Separator Card Drawing]
+    G6[Token Manifest Generator]
+    G7[Crop Map Synthesizer]
+  end
+  subgraph Inv ["InventoryView"]
+    I1[_task_generate_missing_proxies]
+  end
+  subgraph Core ["src/pipeline.py"]
+    P1[run_locals_only]
+    P2[run_plan]
+  end
+  G1 -.leak.-> P1
+  G2 -.leak.-> P1
+  G3 -.leak.-> P1
+  G4 -.leak.-> P1
+  I1 -.leak.-> P1
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class G1,G2,G3,G4,G5,G6,G7,I1 leak;
+              </pre>
             </div>
 
-            <div class="space-y-2">
-              <span class="text-xs font-mono font-semibold uppercase tracking-wider text-indigo-700">After: Deep Deck Intake Module</span>
-              <div class="rounded-lg border border-indigo-200 bg-indigo-50/20 p-4 min-h-[300px] flex items-center justify-center">
-                <pre class="mermaid">
-                  flowchart TD
-                    subgraph UI ["GUI / CLI"]
-                      Client["Client (URL / Text)"]
-                    end
-                    subgraph DeepIntake ["Deep Deck Intake Module"]
-                      Seam["Deck Intake Interface"]
-                      subgraph Adapters ["Parser Adapters"]
-                        A1["Lorcana"]
-                        A2["One Piece"]
-                        A3["Riftbound"]
-                        A4["Scryfall / MTG"]
-                      end
-                      Engine["Canonical Deck Model\n+ Universal Downloader\n+ Backing Resolver\n+ Expansion Engine"]
-                      Seam --> Adapters --> Engine
-                    end
-                    Client --> Seam
-                    DeepIntake --> Pipe["Print Pipeline"]
-                    style DeepIntake fill:#0f172a,stroke:#334155,color:#ffffff
-                    style Engine fill:#1e293b,stroke:#475569,color:#ffffff
-                    style Seam fill:#3b82f6,stroke:#60a5fa,color:#ffffff
-                </pre>
-              </div>
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 flex flex-col justify-between">
+              <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">After: Deep Print Job Engine</div>
+              <pre class="mermaid">
+flowchart TD
+  subgraph Clients ["Thin View Layer"]
+    C1[GeneratorView]
+    C2[InventoryView]
+    C3[CLI Main]
+  end
+  subgraph Engine ["Deep Print Job Engine (src/pipeline.py)"]
+    Interface["execute(PrintJobSpec, on_event)"]
+    subgraph Internals ["Hidden Implementation"]
+      E1[Multi-Deck Intake & Validation]
+      E2[Separator Card Synthesis]
+      E3[Token Manifest Generator]
+      E4[Parallel Image Download & Bleed]
+      E5[Duplex Grid Assembly]
+    end
+    Interface --> E1 --> E2 --> E3 --> E4 --> E5
+  end
+  C1 --> Interface
+  C2 --> Interface
+  C3 --> Interface
+  classDef deepBox fill:#0f172a,stroke:#334155,color:#f8fafc;
+  class Engine,Interface deepBox;
+              </pre>
             </div>
           </div>
 
-          <!-- Wins -->
-          <div>
-            <p class="text-xs font-mono uppercase tracking-wider text-slate-500 mb-2">Architectural Wins</p>
-            <div class="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
-              <div class="p-2.5 rounded bg-stone-100 font-medium text-slate-800">&bull; Locality: download logic in one module</div>
-              <div class="p-2.5 rounded bg-stone-100 font-medium text-slate-800">&bull; Leverage: one interface, four game sources</div>
-              <div class="p-2.5 rounded bg-stone-100 font-medium text-slate-800">&bull; Four adapters justify the seam</div>
-              <div class="p-2.5 rounded bg-stone-100 font-medium text-slate-800">&bull; Interface shrinks; absorbs parallel loops</div>
-              <div class="p-2.5 rounded bg-stone-100 font-medium text-slate-800">&bull; Deletes 3 duplicate ThreadPool implementations</div>
-              <div class="p-2.5 rounded bg-stone-100 font-medium text-slate-800">&bull; Tests mock one intake interface</div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <div>
+              <p class="font-semibold text-slate-900 mb-1">Problem:</p>
+              <p class="text-slate-600">The GUI module leaks 600 lines of execution logic, multi-deck downloading loops, separator card PIL drawing, and token manifest compilation into Tkinter worker threads.</p>
             </div>
+            <div>
+              <p class="font-semibold text-slate-900 mb-1">Solution:</p>
+              <p class="text-slate-600">Collapse multi-deck compilation, separator drawing, and token reports into a deep Print Job Engine module behind a unified execution interface.</p>
+            </div>
+          </div>
+
+          <div class="border-t border-stone-200 pt-3">
+            <p class="font-semibold text-slate-900 text-xs uppercase tracking-wider mb-2">Architectural Wins:</p>
+            <ul class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-xs text-slate-700">
+              <li class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> <strong>locality:</strong> execution concentrates in core engine</li>
+              <li class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> <strong>deletion test:</strong> deletes 600 LOC from UI</li>
+              <li class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> <strong>leverage:</strong> one interface powers GUI, CLI, and proxies</li>
+              <li class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> <strong>testability:</strong> headless tests verify separator cards</li>
+              <li class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> <strong>interface shrinks:</strong> caller passes one PrintJobSpec</li>
+              <li class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> <strong>seam:</strong> unified progress and cancellation event stream</li>
+            </ul>
           </div>
         </article>
 
         <!-- Candidate 2 -->
-        <article id="candidate-2" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden p-6 md:p-8 space-y-6">
-          <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3 border-b border-slate-100 pb-4">
-            <div>
-              <span class="text-xs uppercase tracking-wider font-mono text-slate-400">Candidate 02</span>
-              <h2 class="text-2xl font-serif font-semibold text-slate-900 mt-0.5">Collapse GUI Execution Monolith into a Deep Print Job Engine</h2>
-            </div>
+        <article id="candidate-2" class="bg-white rounded-xl border border-stone-200 p-6 shadow-sm space-y-6">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <h2 class="text-xl font-serif font-bold text-slate-900">2. Deepen Game Deck Ingestion behind a Unified Deck Intake Module</h2>
             <div class="flex items-center gap-2">
-              <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">Strong</span>
-              <span class="px-2.5 py-1 text-xs font-mono rounded-full bg-slate-100 text-slate-700 border border-slate-200">in-process</span>
+              <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-800">Strong</span>
+              <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-100 text-slate-700 font-mono">ports & adapters</span>
             </div>
           </div>
 
-          <div class="text-xs font-mono text-slate-600 bg-slate-50 p-2.5 rounded border border-slate-200">
-            <strong>Files:</strong> gui/main.py &bull; src/pipeline.py &bull; gui/xml_tab.py &bull; gui/locals_tab.py &bull; gui/widgets.py
+          <div class="text-xs font-mono text-slate-600 bg-stone-50 p-2.5 rounded border border-stone-200 space-y-1">
+            <div><span class="text-slate-400 font-sans">Files: </span>src/deck_importer.py, src/lorcana_scraper.py, src/op_scraper.py, src/rb_scraper.py, src/scryfall.py</div>
           </div>
 
-          <!-- Problem & Solution -->
-          <div class="grid md:grid-cols-2 gap-4 text-sm">
-            <div class="p-4 rounded-lg bg-red-50/50 border border-red-100">
-              <p class="font-semibold text-red-900 text-xs uppercase tracking-wider mb-1">Problem</p>
-              <p class="text-slate-800">The GUI module leaks hundreds of lines of non-UI execution logic, progress bookkeeping, and separator card drawing into a 600-line worker function.</p>
-            </div>
-            <div class="p-4 rounded-lg bg-emerald-50/50 border border-emerald-100">
-              <p class="font-semibold text-emerald-900 text-xs uppercase tracking-wider mb-1">Solution</p>
-              <p class="text-slate-800">Collapse multi-deck compilation, card separator synthesis, and execution orchestration into a deep Print Job Engine module.</p>
-            </div>
-          </div>
-
-          <!-- Before / After Diagram -->
-          <div class="grid md:grid-cols-2 gap-6">
-            <div class="space-y-2">
-              <span class="text-xs font-mono font-semibold uppercase tracking-wider text-slate-500">Before: God GUI with Leaky Execution</span>
-              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 min-h-[300px] flex items-center justify-center">
-                <pre class="mermaid">
-                  flowchart TD
-                    subgraph GUI ["gui/main.py (2000+ lines)"]
-                      Widgets["Tkinter Widgets & Event Loop"]
-                      Work["_work() Monolith (600 lines)"]
-                      Sep["_create_separator_image() (300 lines)"]
-                      Prog["Per-game progress state"]
-                      Widgets --> Work
-                      Work --> Sep
-                      Work --> Prog
-                    end
-                    Work -.leak.-> P1["pipeline.run_plan"]
-                    Work -.leak.-> P2["pipeline.run_locals_only"]
-                    Work -.leak.-> D["scrapers direct execution"]
-                    classDef leak stroke:#dc2626,stroke-width:2px;
-                    class Work,Sep leak;
-                </pre>
-              </div>
+          <!-- Side-by-side Before / After Diagram -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 flex flex-col justify-between">
+              <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Before: Fragmented Scrapers & Duplicate Pipelines</div>
+              <pre class="mermaid">
+flowchart TD
+  subgraph Parsers ["Shallow Parser Modules"]
+    P1[MtgDeckAdapter]
+    P2[LorcanaDeckAdapter]
+    P3[OnePieceDeckAdapter]
+    P4[RiftboundDeckAdapter]
+  end
+  subgraph Scrapers ["Separate Scraper Modules"]
+    S1[scryfall.py download]
+    S2[lorcana_scraper.py download]
+    S3[op_scraper.py download]
+    S4[rb_scraper.py download]
+  end
+  P1 -.-> S1
+  P2 -.-> S2
+  P3 -.-> S3
+  P4 -.-> S4
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class S1,S2,S3,S4 leak;
+              </pre>
             </div>
 
-            <div class="space-y-2">
-              <span class="text-xs font-mono font-semibold uppercase tracking-wider text-indigo-700">After: Thin GUI + Deep Print Job Engine</span>
-              <div class="rounded-lg border border-indigo-200 bg-indigo-50/20 p-4 min-h-[300px] flex items-center justify-center">
-                <pre class="mermaid">
-                  flowchart TD
-                    subgraph ThinGUI ["Thin GUI Layer"]
-                      UIState["UI Forms &amp; File Pickers"]
-                      Events["Event Queue Drainer"]
-                    end
-                    subgraph PrintJobEngine ["Deep Print Job Engine"]
-                      Interface["execute(PrintJobSpec, progress_cb)"]
-                      subgraph Internals ["Private Engine Sub-steps"]
-                        S1["Pre-flight &amp; Slot Planning"]
-                        S2["Separator Card Synthesis"]
-                        S3["Parallel Download &amp; Crop"]
-                        S4["Duplex PDF Assembly"]
-                      end
-                      Interface --> S1 --> S2 --> S3 --> S4
-                    end
-                    UIState -->|PrintJobSpec| Interface
-                    Interface -. Progress Events .-> Events
-                    style PrintJobEngine fill:#0f172a,stroke:#334155,color:#ffffff
-                    style Interface fill:#3b82f6,stroke:#60a5fa,color:#ffffff
-                </pre>
-              </div>
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 flex flex-col justify-between">
+              <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">After: Deep Deck Intake Module</div>
+              <pre class="mermaid">
+flowchart TD
+  subgraph Callers ["Print Engine / Inventory"]
+    Caller["Intake Request (URL or Text)"]
+  end
+  subgraph DeckIntake ["Deep Deck Intake Module"]
+    Interface["ingest_deck(source) -> IngestedDeck"]
+    subgraph Adapters ["Parser Adapters"]
+      A1[MTG Adapter]
+      A2[Lorcana Adapter]
+      A3[One Piece Adapter]
+      A4[Riftbound Adapter]
+    end
+    subgraph CoreEngine ["Hidden Ingestion Machinery"]
+      B1[Parallel Image Fetcher & Cache]
+      B2[Backing Resolver & Fallbacks]
+      B3[Slot Pair Expansion Engine]
+    end
+    Interface --> Adapters --> CoreEngine
+  end
+  Caller --> Interface
+  classDef deepBox fill:#0f172a,stroke:#334155,color:#f8fafc;
+  class DeckIntake,Interface deepBox;
+              </pre>
             </div>
           </div>
 
-          <!-- Wins -->
-          <div>
-            <p class="text-xs font-mono uppercase tracking-wider text-slate-500 mb-2">Architectural Wins</p>
-            <div class="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
-              <div class="p-2.5 rounded bg-stone-100 font-medium text-slate-800">&bull; Locality: execution concentrates in pipeline</div>
-              <div class="p-2.5 rounded bg-stone-100 font-medium text-slate-800">&bull; GUI shrinks to pure UI dispatch</div>
-              <div class="p-2.5 rounded bg-stone-100 font-medium text-slate-800">&bull; Deletion test: absorbs complexity from UI</div>
-              <div class="p-2.5 rounded bg-stone-100 font-medium text-slate-800">&bull; Separator drawing gains headless testability</div>
-              <div class="p-2.5 rounded bg-stone-100 font-medium text-slate-800">&bull; Single event stream across all runs</div>
-              <div class="p-2.5 rounded bg-stone-100 font-medium text-slate-800">&bull; CLI and GUI share identical pipeline</div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <div>
+              <p class="font-semibold text-slate-900 mb-1">Problem:</p>
+              <p class="text-slate-600">External deck downloading, thread pools, card expansion, and fallback back generation are duplicated across four shallow scraper modules.</p>
             </div>
+            <div>
+              <p class="font-semibold text-slate-900 mb-1">Solution:</p>
+              <p class="text-slate-600">Unify external deck downloading and slot expansion behind a deep Deck Intake module with game-specific parser adapters.</p>
+            </div>
+          </div>
+
+          <div class="border-t border-stone-200 pt-3">
+            <p class="font-semibold text-slate-900 text-xs uppercase tracking-wider mb-2">Architectural Wins:</p>
+            <ul class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-xs text-slate-700">
+              <li class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> <strong>locality:</strong> downloading logic concentrates in one module</li>
+              <li class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> <strong>leverage:</strong> one interface across four game engines</li>
+              <li class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> <strong>seam:</strong> four adapters justify the intake seam</li>
+              <li class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> <strong>deletion test:</strong> deletes 4 redundant downloading loops</li>
+              <li class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> <strong>interface shrinks:</strong> absorbs thread pools and retries</li>
+              <li class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> <strong>testability:</strong> tests mock one canonical intake interface</li>
+            </ul>
           </div>
         </article>
 
         <!-- Candidate 3 -->
-        <article id="candidate-3" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden p-6 md:p-8 space-y-6">
-          <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3 border-b border-slate-100 pb-4">
-            <div>
-              <span class="text-xs uppercase tracking-wider font-mono text-slate-400">Candidate 03</span>
-              <h2 class="text-2xl font-serif font-semibold text-slate-900 mt-0.5">Deepen Card Image Preparation behind Source Profiles</h2>
-            </div>
+        <article id="candidate-3" class="bg-white rounded-xl border border-stone-200 p-6 shadow-sm space-y-6">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <h2 class="text-xl font-serif font-bold text-slate-900">3. Deepen Card Image Preparation behind Declarative Source Profiles</h2>
             <div class="flex items-center gap-2">
-              <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800 border border-amber-200">Worth exploring</span>
-              <span class="px-2.5 py-1 text-xs font-mono rounded-full bg-slate-100 text-slate-700 border border-slate-200">in-process</span>
+              <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800">Worth exploring</span>
+              <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-100 text-slate-700 font-mono">in-process</span>
             </div>
           </div>
 
-          <div class="text-xs font-mono text-slate-600 bg-slate-50 p-2.5 rounded border border-slate-200">
-            <strong>Files:</strong> src/cropper.py &bull; src/pipeline.py &bull; gui/locals_tab.py &bull; cli/main.py
+          <div class="text-xs font-mono text-slate-600 bg-stone-50 p-2.5 rounded border border-stone-200 space-y-1">
+            <div><span class="text-slate-400 font-sans">Files: </span>src/cropper.py, src/pipeline.py, gui/views/generator_view.py, gui/views/generator_tabs.py</div>
           </div>
 
-          <!-- Problem & Solution -->
-          <div class="grid md:grid-cols-2 gap-4 text-sm">
-            <div class="p-4 rounded-lg bg-red-50/50 border border-red-100">
-              <p class="font-semibold text-red-900 text-xs uppercase tracking-wider mb-1">Problem</p>
-              <p class="text-slate-800">Boolean flags and crop dictionaries leak through four layers of modules to handle MPC bleed vs Scryfall corners vs local uploads.</p>
-            </div>
-            <div class="p-4 rounded-lg bg-emerald-50/50 border border-emerald-100">
-              <p class="font-semibold text-emerald-900 text-xs uppercase tracking-wider mb-1">Solution</p>
-              <p class="text-slate-800">Encapsulate image preparation recipes inside a deep Card Image Normalizer module parameterized by a declarative Source Profile.</p>
-            </div>
-          </div>
-
-          <!-- Before / After Diagram (Mass / Cross Section Diagram) -->
-          <div class="grid md:grid-cols-2 gap-6">
-            <div class="space-y-2">
-              <span class="text-xs font-mono font-semibold uppercase tracking-wider text-slate-500">Before: Leaky Boolean Maps Across 4 Layers</span>
-              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 min-h-[300px] flex flex-col justify-center space-y-2">
-                <div class="p-2 border border-red-300 bg-red-50 rounded text-xs font-mono text-red-800">
-                  GUI / CLI: builds dict[Path, bool] (local_crop_map)
-                </div>
-                <div class="text-center text-red-500 text-xs">&darr; leaks crop_map argument</div>
-                <div class="p-2 border border-red-300 bg-red-50 rounded text-xs font-mono text-red-800">
-                  pipeline.run_xmls(..., local_crop_map=...)
-                </div>
-                <div class="text-center text-red-500 text-xs">&darr; leaks crop_map argument</div>
-                <div class="p-2 border border-red-300 bg-red-50 rounded text-xs font-mono text-red-800">
-                  pipeline._build_crop_tasks(..., crop_map=...)
-                </div>
-                <div class="text-center text-red-500 text-xs">&darr; passes crop_borders: bool</div>
-                <div class="p-2 border border-red-300 bg-red-50 rounded text-xs font-mono text-red-800">
-                  cropper.process_for_pdf(raw, bled, crop_borders)
-                </div>
-              </div>
+          <!-- Side-by-side Before / After Diagram -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 flex flex-col justify-between">
+              <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Before: Leaking crop_map Dictionaries</div>
+              <pre class="mermaid">
+flowchart TD
+  subgraph Callers ["Call Sites (GUI / Scrapers)"]
+    M1["op_crop_extra = {p: False}"]
+    M2["rb_crop_extra = {p: False}"]
+    M3["local_crop_map = {p: bool}"]
+  end
+  subgraph Pipeline ["Pipeline Layer"]
+    P1["run_locals_only(..., local_crop_map)"]
+    P2["process_for_pdf(crop_borders=bool)"]
+  end
+  M1 -.leak dict.-> P1
+  M2 -.leak dict.-> P1
+  M3 -.leak dict.-> P1
+  P1 -.-> P2
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class M1,M2,M3 leak;
+              </pre>
             </div>
 
-            <div class="space-y-2">
-              <span class="text-xs font-mono font-semibold uppercase tracking-wider text-indigo-700">After: Deep Normalizer Seam with Source Profiles</span>
-              <div class="rounded-lg border border-indigo-200 bg-indigo-50/20 p-4 min-h-[300px] flex flex-col justify-center">
-                <div class="deep-card text-white p-5 rounded-lg border border-slate-700 shadow-md space-y-3">
-                  <div class="flex items-center justify-between border-b border-slate-700 pb-2">
-                    <span class="text-xs uppercase font-mono tracking-wider text-blue-300">Deep Module</span>
-                    <span class="text-xs font-mono text-slate-400">normalize(card_image, profile)</span>
-                  </div>
-                  <div class="grid grid-cols-3 gap-2 text-center text-xs font-mono">
-                    <div class="p-2 rounded bg-slate-800 border border-slate-700">Profile: MPCFill<br/><span class="text-[10px] text-slate-400">(Trim + Mirror)</span></div>
-                    <div class="p-2 rounded bg-slate-800 border border-slate-700">Profile: Scryfall<br/><span class="text-[10px] text-slate-400">(Fill Corners + Mirror)</span></div>
-                    <div class="p-2 rounded bg-slate-800 border border-slate-700">Profile: Direct<br/><span class="text-[10px] text-slate-400">(Mirror Only)</span></div>
-                  </div>
-                  <p class="text-xs text-slate-300 pt-1">Callers supply raw card and declare profile. All cropping, corner sampling, luminance math, and mirror-bleed remain private implementation.</p>
-                </div>
-              </div>
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 flex flex-col justify-between">
+              <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">After: Declarative Source Profile Seam</div>
+              <pre class="mermaid">
+flowchart TD
+  subgraph Callers ["Call Sites"]
+    Req["normalize_card_image(path, profile)"]
+  end
+  subgraph Normalizer ["Deep Card Image Normalizer"]
+    Profiles["Source Profiles (MPC_BLEED | SCRYFALL | PRETRIMMED)"]
+    subgraph Ops ["Internal Operations"]
+      O1[Trim Bleed Margin]
+      O2[Corner Color Sampling]
+      O3[Mirror Bleed Padding]
+      O4[Disk Cache Check]
+    end
+    Profiles --> Ops
+  end
+  Req --> Normalizer
+  classDef deepBox fill:#0f172a,stroke:#334155,color:#f8fafc;
+  class Normalizer deepBox;
+              </pre>
             </div>
           </div>
 
-          <!-- Wins -->
-          <div>
-            <p class="text-xs font-mono uppercase tracking-wider text-slate-500 mb-2">Architectural Wins</p>
-            <div class="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
-              <div class="p-2.5 rounded bg-stone-100 font-medium text-slate-800">&bull; Interface shrinks: deletes crop_map propagation</div>
-              <div class="p-2.5 rounded bg-stone-100 font-medium text-slate-800">&bull; Locality: image transforms concentrated together</div>
-              <div class="p-2.5 rounded bg-stone-100 font-medium text-slate-800">&bull; High leverage across all card sources</div>
-              <div class="p-2.5 rounded bg-stone-100 font-medium text-slate-800">&bull; Easy to add game-specific bleed profiles</div>
-              <div class="p-2.5 rounded bg-stone-100 font-medium text-slate-800">&bull; Tests target single transformation seam</div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <div>
+              <p class="font-semibold text-slate-900 mb-1">Problem:</p>
+              <p class="text-slate-600">Mutable crop dictionaries and boolean flags leak through four layers of calling modules to distinguish MPC bleed from Scryfall corners.</p>
             </div>
+            <div>
+              <p class="font-semibold text-slate-900 mb-1">Solution:</p>
+              <p class="text-slate-600">Encapsulate image preparation recipes inside a deep Card Image Normalizer module parameterized by declarative source profiles.</p>
+            </div>
+          </div>
+
+          <div class="border-t border-stone-200 pt-3">
+            <p class="font-semibold text-slate-900 text-xs uppercase tracking-wider mb-2">Architectural Wins:</p>
+            <ul class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-xs text-slate-700">
+              <li class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> <strong>interface shrinks:</strong> deletes crop_map parameter propagation</li>
+              <li class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> <strong>locality:</strong> bleed trimming and mirror bleeding in one place</li>
+              <li class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> <strong>leverage:</strong> reusable across XML, Scryfall, and local images</li>
+              <li class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> <strong>extensibility:</strong> add game-specific profiles without touching callers</li>
+            </ul>
           </div>
         </article>
 
         <!-- Candidate 4 -->
-        <article id="candidate-4" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden p-6 md:p-8 space-y-6">
-          <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3 border-b border-slate-100 pb-4">
-            <div>
-              <span class="text-xs uppercase tracking-wider font-mono text-slate-400">Candidate 04</span>
-              <h2 class="text-2xl font-serif font-semibold text-slate-900 mt-0.5">Consolidate Scryfall Resolution &amp; Quality Assessment Seam</h2>
-            </div>
+        <article id="candidate-4" class="bg-white rounded-xl border border-stone-200 p-6 shadow-sm space-y-6">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <h2 class="text-xl font-serif font-bold text-slate-900">4. Consolidate Scryfall Quality Assessment Seam across Tools & Validator</h2>
             <div class="flex items-center gap-2">
-              <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800 border border-amber-200">Worth exploring</span>
-              <span class="px-2.5 py-1 text-xs font-mono rounded-full bg-slate-100 text-slate-700 border border-slate-200">ports &amp; adapters</span>
+              <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800">Worth exploring</span>
+              <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-slate-100 text-slate-700 font-mono">ports & adapters</span>
             </div>
           </div>
 
-          <div class="text-xs font-mono text-slate-600 bg-slate-50 p-2.5 rounded border border-slate-200">
-            <strong>Files:</strong> src/scryfall.py &bull; src/quality.py &bull; image_quality_analyzer.py &bull; gui/moxfield_validator.py
+          <div class="text-xs font-mono text-slate-600 bg-stone-50 p-2.5 rounded border border-stone-200 space-y-1">
+            <div><span class="text-slate-400 font-sans">Files: </span>src/scryfall.py, src/quality.py, image_quality_analyzer.py, gui/views/validator_view.py</div>
           </div>
 
-          <!-- Problem & Solution -->
-          <div class="grid md:grid-cols-2 gap-4 text-sm">
-            <div class="p-4 rounded-lg bg-red-50/50 border border-red-100">
-              <p class="font-semibold text-red-900 text-xs uppercase tracking-wider mb-1">Problem</p>
-              <p class="text-slate-800">Scryfall querying, quality filtering (Laplacian variance), and fallback prints leak across three separate modules and the validator GUI.</p>
-            </div>
-            <div class="p-4 rounded-lg bg-emerald-50/50 border border-emerald-100">
-              <p class="font-semibold text-emerald-900 text-xs uppercase tracking-wider mb-1">Solution</p>
-              <p class="text-slate-800">Deepen Scryfall interaction into a unified Scryfall Resolver module that encapsulates rate limiting, quality audits, fallback print searches, and preview caching.</p>
-            </div>
-          </div>
-
-          <!-- ADR Callout -->
-          <div class="p-3.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900">
-            <strong>ADR Alignment:</strong> Complements <code>ADR-0001 (Moxfield Validator GUI)</code> by cleanly separating Scryfall validation mechanics into a headless core module while keeping the Tkinter GUI lightweight.
-          </div>
-
-          <!-- Before / After Diagram -->
-          <div class="grid md:grid-cols-2 gap-6">
-            <div class="space-y-2">
-              <span class="text-xs font-mono font-semibold uppercase tracking-wider text-slate-500">Before: Redundant Quality &amp; Query Paths</span>
-              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 min-h-[300px] flex items-center justify-center">
-                <pre class="mermaid">
-                  flowchart TD
-                    CLI["image_quality_analyzer"] --> Q1["quality.py"]
-                    Scryfall["src/scryfall.py"] --> Q2["quality.py"]
-                    Validator["gui/moxfield_validator.py"] --> Scryfall
-                    Validator -.custom check.-> API["Scryfall API"]
-                    Scryfall --> API
-                    classDef leak stroke:#dc2626,stroke-width:2px;
-                    class Validator leak;
-                </pre>
-              </div>
+          <!-- Side-by-side Before / After Diagram -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 flex flex-col justify-between">
+              <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Before: Fragmented Quality Scripts & Duplicate UI</div>
+              <pre class="mermaid">
+flowchart TD
+  subgraph Standalone ["image_quality_analyzer.py (943 LOC)"]
+    A1[Standalone Tkinter UI]
+    A2[Custom OpenCV Laplacian]
+    A3[Duplicate Scryfall Resolver]
+  end
+  subgraph CoreApp ["Core Application"]
+    Q1[src/quality.py check_image_quality]
+    V1[ValidatorView]
+  end
+  A2 -.leak duplication.-> Q1
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class A1,A2,A3 leak;
+              </pre>
             </div>
 
-            <div class="space-y-2">
-              <span class="text-xs font-mono font-semibold uppercase tracking-wider text-indigo-700">After: Deep Scryfall Resolver Module</span>
-              <div class="rounded-lg border border-indigo-200 bg-indigo-50/20 p-4 min-h-[300px] flex items-center justify-center">
-                <pre class="mermaid">
-                  flowchart TD
-                    subgraph Consumers ["Consumers"]
-                      GUIVal["Moxfield Validator GUI"]
-                      PipeDeck["Deck Import Pipeline"]
-                      QualityCLI["Quality Analyzer CLI"]
-                    end
-                    subgraph DeepResolver ["Deep Scryfall Resolver Module"]
-                      ResolverSeam["ScryfallCardResolver Interface"]
-                      subgraph Logic ["Private Implementation"]
-                        RateLimit["Rate Limiter (10 req/s)"]
-                        QualCheck["Laplacian Blur &amp; Resolution Check"]
-                        FallbackSearch["Alternative Print Search Engine"]
-                        PreviewCache["Small Preview Image Cache"]
-                      end
-                      ResolverSeam --> RateLimit --> QualCheck --> FallbackSearch --> PreviewCache
-                    end
-                    Consumers --> ResolverSeam
-                    style DeepResolver fill:#0f172a,stroke:#334155,color:#ffffff
-                    style ResolverSeam fill:#3b82f6,stroke:#60a5fa,color:#ffffff
-                </pre>
-              </div>
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 flex flex-col justify-between">
+              <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">After: Unified Quality Checker Seam</div>
+              <pre class="mermaid">
+flowchart TD
+  subgraph Clients ["Consumers"]
+    C1[ValidatorView]
+    C2[Pipeline Precheck]
+    C3[Analyzer CLI / Window]
+  end
+  subgraph QualityModule ["Deep Image Quality Checker (src/quality.py)"]
+    Interface["evaluate_card_quality(image_path, spec)"]
+    subgraph Hidden ["Hidden Algorithms"]
+      K1[Resolution & DPI Audit]
+      K2[Laplacian Focus Variance]
+      K3[Brightness & Contrast Check]
+      K4[Aspect Ratio Verification]
+    end
+    Interface --> Hidden
+  end
+  C1 --> Interface
+  C2 --> Interface
+  C3 --> Interface
+  classDef deepBox fill:#0f172a,stroke:#334155,color:#f8fafc;
+  class QualityModule deepBox;
+              </pre>
             </div>
           </div>
 
-          <!-- Wins -->
-          <div>
-            <p class="text-xs font-mono uppercase tracking-wider text-slate-500 mb-2">Architectural Wins</p>
-            <div class="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
-              <div class="p-2.5 rounded bg-stone-100 font-medium text-slate-800">&bull; Locality: Scryfall rules in one module</div>
-              <div class="p-2.5 rounded bg-stone-100 font-medium text-slate-800">&bull; Eliminates duplicate Laplacian quality checks</div>
-              <div class="p-2.5 rounded bg-stone-100 font-medium text-slate-800">&bull; Validator GUI becomes thin client</div>
-              <div class="p-2.5 rounded bg-stone-100 font-medium text-slate-800">&bull; Rate limiting protected across all callers</div>
-              <div class="p-2.5 rounded bg-stone-100 font-medium text-slate-800">&bull; Tests mock one resolution interface</div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <div>
+              <p class="font-semibold text-slate-900 mb-1">Problem:</p>
+              <p class="text-slate-600">The standalone 943-line image analyzer script duplicates Laplacian blur checks, aspect ratio metrics, and Scryfall querying implemented in core modules.</p>
             </div>
+            <div>
+              <p class="font-semibold text-slate-900 mb-1">Solution:</p>
+              <p class="text-slate-600">Deepen image quality verification into a single quality checker module powering the validator view, pipeline precheck, and standalone analyzer.</p>
+            </div>
+          </div>
+
+          <div class="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-900">
+            <strong>ADR alignment:</strong> Complements ADR-0001 by ensuring all card validation interfaces remain thin clients over core quality verification modules.
+          </div>
+
+          <div class="border-t border-stone-200 pt-3">
+            <p class="font-semibold text-slate-900 text-xs uppercase tracking-wider mb-2">Architectural Wins:</p>
+            <ul class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-xs text-slate-700">
+              <li class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> <strong>locality:</strong> quality metrics concentrate in one module</li>
+              <li class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> <strong>deletion test:</strong> eliminates 943 LOC duplicate script</li>
+              <li class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> <strong>leverage:</strong> one quality engine across CLI and GUI</li>
+              <li class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> <strong>testability:</strong> single test suite for image quality checks</li>
+            </ul>
           </div>
         </article>
 
       </section>
 
       <!-- Top Recommendation Section -->
-      <section id="top-recommendation" class="bg-gradient-to-br from-slate-900 to-indigo-950 text-white rounded-xl p-8 border border-slate-800 shadow-lg space-y-4">
+      <section id="top-recommendation" class="bg-slate-900 text-slate-100 rounded-xl p-8 shadow-md space-y-4">
         <div class="flex items-center gap-2">
-          <span class="px-3 py-1 text-xs uppercase font-mono font-bold tracking-wider rounded-full bg-emerald-400/20 text-emerald-300 border border-emerald-400/30">Top Recommendation</span>
+          <span class="px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-500 text-slate-950 font-bold uppercase tracking-wider">Top Recommendation</span>
         </div>
-        <h2 class="text-2xl font-serif font-bold text-white">Start with Candidate 01: Consolidate External Game Deck Scrapers</h2>
+        <h2 class="text-2xl font-serif font-bold text-white">
+          <a href="#candidate-1" class="hover:text-emerald-400 underline decoration-emerald-500 underline-offset-4">1. Collapse GUI Execution Monolith into a Deep Print Job Engine</a>
+        </h2>
         <p class="text-slate-300 text-sm leading-relaxed max-w-3xl">
-          The four external card game scrapers (Lorcana, One Piece, Riftbound, and MTG/Scryfall) exhibit the highest duplication in the codebase—each re-implementing thread pools, card quantity expansions, fallback card backs, and error recovery. Deepening this into a unified <strong>Deck Intake module</strong> immediately reduces hundreds of lines of shallow boilerplate and establishes a clean seam that makes Candidate 02 significantly simpler to execute.
+          The <span class="font-mono text-xs bg-slate-800 px-1.5 py-0.5 rounded text-emerald-400">GeneratorView._work</span> monolith (600+ lines) is currently the highest-friction hotspot in the codebase. Extracting multi-deck coordination, separator card generation, and token manifest generation into a deep Print Job Engine concentrates all core business logic into a headlessly testable module, drastically simplifies the GUI, and establishes the unified execution interface needed by the missing proxy generator in <span class="font-mono text-xs bg-slate-800 px-1.5 py-0.5 rounded text-emerald-400">InventoryView</span>.
         </p>
-        <div class="pt-2">
-          <a href="#candidate-1" class="inline-flex items-center gap-2 text-sm font-medium text-indigo-300 hover:text-indigo-200 transition-colors">
-            &larr; Jump to Candidate 01 card
-          </a>
-        </div>
       </section>
 
     </main>

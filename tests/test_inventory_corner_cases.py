@@ -237,3 +237,72 @@ class TestComplexStockAllocationOptionC:
         # Total physical = 2, Deck 2 used 1 physical. So 1 physical remains for Deck 1
         assert plan_deck1_edit.total_owned == 1
         assert plan_deck1_edit.total_missing == 0
+
+    def test_register_deck_with_existing_and_non_existing_id(self, inventory_service):
+        # 1. Insert new deck
+        deck1 = DeckRecord(name="Explicit ID Deck", format="Modern")
+        d1_id = inventory_service.register_deck(deck1, [DeckCardEntry(deck_id=0, oracle_id="oid-bolt", name="Bolt", set_code="m11", collector_number="149", quantity_required=4)])
+        assert d1_id > 0
+
+        # 2. Update existing deck with ID d1_id
+        deck1_updated = DeckRecord(id=d1_id, name="Updated Explicit ID Deck", format="Legacy")
+        d1_updated_id = inventory_service.register_deck(deck1_updated, [DeckCardEntry(deck_id=d1_id, oracle_id="oid-bolt", name="Bolt", set_code="m11", collector_number="149", quantity_required=3)])
+        assert d1_updated_id == d1_id
+
+        loaded_deck, loaded_cards = inventory_service.get_deck_by_id(d1_id)
+        assert loaded_deck.name == "Updated Explicit ID Deck"
+        assert loaded_deck.format == "Legacy"
+        assert len(loaded_cards) == 1
+        assert loaded_cards[0].quantity_required == 3
+
+    def test_import_deck_cards_to_inventory_edge_cases(self, inventory_service):
+        # 1. Non-existent deck
+        assert inventory_service.import_deck_cards_to_inventory(12345) == 0
+
+        # 2. Deck with empty cards
+        empty_deck = DeckRecord(name="Empty Deck")
+        empty_id = inventory_service.register_deck(empty_deck, [])
+        assert inventory_service.import_deck_cards_to_inventory(empty_id) == 0
+
+        # 3. Deck with cards: import as physical cards
+        deck_with_cards = DeckRecord(name="Deck With Cards")
+        cards = [
+            DeckCardEntry(deck_id=0, oracle_id="o-1", name="Card 1", set_code="set1", collector_number="1", quantity_required=2),
+            DeckCardEntry(deck_id=0, oracle_id="o-2", name="Card 2", set_code="set2", collector_number="2", quantity_required=3),
+        ]
+        deck_id = inventory_service.register_deck(deck_with_cards, cards)
+
+        # First import: inserts into inventory
+        count = inventory_service.import_deck_cards_to_inventory(deck_id, as_proxy=False)
+        assert count > 0
+
+        # Second import: updates quantities in inventory
+        count2 = inventory_service.import_deck_cards_to_inventory(deck_id, as_proxy=False)
+        assert count2 > 0
+
+        inv_cards = inventory_service.get_inventory_cards()
+        c1 = next(c for c in inv_cards if c.name == "Card 1")
+        assert c1.quantity == 4  # 2 + 2
+
+    def test_stock_allocation_alternative_match_deduction(self, inventory_service):
+        # Inventory has 2 copies of Counterspell (EMA edition)
+        inventory_service.add_or_update_card(
+            InventoryCard(oracle_id="oid-cs", name="Counterspell", set_code="ema", collector_number="43", quantity=2)
+        )
+
+        # Deck 1 used 1 copy of Counterspell in ICE edition (alternative/oracle match)
+        deck1_cards = [
+            DeckCardEntry(deck_id=0, oracle_id="oid-cs", name="Counterspell", set_code="ice", collector_number="57", quantity_required=1, is_proxy=False)
+        ]
+        inventory_service.register_deck(DeckRecord(name="Deck 1"), deck1_cards)
+
+        # Deck 2 requests 2 copies of Counterspell
+        deck2_cards = [
+            DeckCardEntry(deck_id=0, oracle_id="oid-cs", name="Counterspell", set_code="ema", collector_number="43", quantity_required=2, is_proxy=False)
+        ]
+
+        # In exclusive mode, 1 physical copy was deducted by Deck 1 alternative match, so only 1 exact match remains and 1 is missing
+        plan = inventory_service.calculate_missing_proxies(deck2_cards, allocate_mode="exclusive")
+        assert plan.total_owned == 1
+        assert plan.total_missing == 1
+

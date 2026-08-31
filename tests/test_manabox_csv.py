@@ -134,3 +134,54 @@ class TestManaBoxCSV:
 
         with pytest.raises(ValueError, match="Modo de importación no válido"):
             import_parsed_cards([], db_path=db_file, mode="invalid_mode")
+
+    def test_parse_csv_string_path(self, tmp_path: Path):
+        csv_file = tmp_path / "manabox_path.csv"
+        csv_file.write_text(SAMPLE_MANABOX_CSV, encoding="utf-8")
+
+        cards = parse_manabox_csv(str(csv_file))
+        assert len(cards) == 3
+
+    def test_parse_csv_encoding_fallback(self, tmp_path: Path):
+        csv_file = tmp_path / "manabox_latin1.csv"
+        # Write bytes that fail utf-8 decoding
+        latin1_content = "Name,Set code,Collector number,Quantity\nLórien Revealed,ltr,180,1\n".encode("latin-1")
+        csv_file.write_bytes(latin1_content)
+
+        cards = parse_manabox_csv(csv_file)
+        assert len(cards) == 1
+        assert "L" in cards[0].name
+
+    def test_parse_csv_altered_misprint_and_invalid_qty(self):
+        csv_text = """Name,Set code,Collector number,Quantity,Altered,Misprint
+Counterspell,ema,43,invalid_qty,true,1
+Lightning Bolt,m11,149,0,false,false
+"""
+        cards = parse_manabox_csv(csv_text)
+        assert len(cards) == 1
+        assert cards[0].name == "Counterspell"
+        assert cards[0].quantity == 1
+        assert cards[0].metadata.get("altered") is True
+        assert cards[0].metadata.get("misprint") is True
+
+    def test_import_replace_mode_empty_cards_wipes_physical(self, tmp_path: Path):
+        db_file = tmp_path / "test_empty_replace.db"
+        init_db(db_file)
+
+        with get_db(db_file) as conn:
+            conn.execute(
+                "INSERT INTO inventory_cards (oracle_id, name, set_code, collector_number, quantity, is_proxy) VALUES ('o1', 'Physical', 'm20', '1', 2, 0)"
+            )
+            conn.execute(
+                "INSERT INTO inventory_cards (oracle_id, name, set_code, collector_number, quantity, is_proxy) VALUES ('o2', 'Proxy', 'm20', '2', 2, 1)"
+            )
+
+        total = import_parsed_cards([], db_path=db_file, mode="replace")
+        assert total == 0
+
+        with get_db(db_file) as conn:
+            phys = conn.execute("SELECT * FROM inventory_cards WHERE is_proxy = 0").fetchall()
+            assert len(phys) == 0
+            prox = conn.execute("SELECT * FROM inventory_cards WHERE is_proxy = 1").fetchall()
+            assert len(prox) == 1
+

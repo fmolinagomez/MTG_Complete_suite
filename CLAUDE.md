@@ -81,7 +81,7 @@ MPCFillToPDF/
 │   └── procesamiento/         # Download cache, previews/, intermediate files
 ├── docs/                      # Architectural reviews, ADRs, and implementation plans
 │   └── adr/                   # Architecture Decision Records
-└── tests/                     # Unit and integration test suites (772+ tests)
+└── tests/                     # Unit, integration, and corner-case test suites (850+ tests)
 ```
 
 ### Environment management (uv)
