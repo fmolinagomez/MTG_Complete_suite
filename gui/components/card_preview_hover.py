@@ -447,7 +447,10 @@ class CardHoverPreview:
                     return
                 target = self._front_label if suffix == "front" else self._back_label
                 if target and target.winfo_exists():
-                    target.configure(image=self._get_error_photo())
+                    try:
+                        target.configure(image=self._get_error_photo())
+                    except Exception:
+                        pass
 
             try:
                 self.root.after(0, _apply_error)

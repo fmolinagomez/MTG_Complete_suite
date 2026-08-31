@@ -114,7 +114,7 @@ def download_image(drive_id: str, dest_dir: Path, filename: str) -> Path:
     dest_dir.mkdir(parents=True, exist_ok=True)
     suffix = Path(filename).suffix or ".jpg"
     output_path = dest_dir / f"{drive_id}{suffix}"
-    if output_path.exists():
+    if output_path.exists() and output_path.stat().st_size > 0:
         _log.debug("Download cache hit: %s", output_path.name)
         return output_path
 
@@ -122,6 +122,8 @@ def download_image(drive_id: str, dest_dir: Path, filename: str) -> Path:
     tmp_path = dest_dir / f"{drive_id}_{os.getpid()}_{threading.current_thread().ident}{suffix}.tmp"
 
     delay = _INITIAL_BACKOFF
+    last_timeout_exc: Exception | None = None
+
     for attempt in range(_MAX_RETRIES + 1):
         try:
             resp = requests.get(
@@ -130,26 +132,74 @@ def download_image(drive_id: str, dest_dir: Path, filename: str) -> Path:
                 timeout=(_CONNECT_TIMEOUT, _READ_TIMEOUT),
             )
             resp.raise_for_status()
+
+            # Handle Google Drive virus scan warning page if returned as HTML
+            content_type = resp.headers.get("Content-Type", "").lower()
+            if "text/html" in content_type:
+                text_sample = ""
+                try:
+                    if hasattr(resp, "text") and isinstance(resp.text, str):
+                        text_sample = resp.text[:4096]
+                    elif hasattr(resp, "content") and isinstance(resp.content, (bytes, bytearray)):
+                        text_sample = resp.content[:4096].decode("utf-8", errors="ignore")
+                except Exception:
+                    pass
+                if "virus scan warning" in text_sample.lower() or "confirm=" in text_sample or "download_warning" in text_sample:
+                    resp = requests.get(
+                        f"https://drive.google.com/uc?export=download&id={drive_id}&confirm=t",
+                        stream=True,
+                        timeout=(_CONNECT_TIMEOUT, _READ_TIMEOUT),
+                    )
+                    resp.raise_for_status()
+
             with tmp_path.open("wb") as fh:
                 for chunk in resp.iter_content(chunk_size=65536):
                     fh.write(chunk)
             tmp_path.replace(output_path)
             _log.debug("Downloaded: %s", output_path.name)
             return output_path
-        except requests.exceptions.Timeout:
+        except requests.exceptions.Timeout as exc:
             _safe_unlink(tmp_path)
+            last_timeout_exc = exc
+            if attempt < _MAX_RETRIES:
+                _log.warning(
+                    "Timeout downloading %s (%s), retry %d/%d in %.0fs",
+                    filename,
+                    drive_id,
+                    attempt + 1,
+                    _MAX_RETRIES,
+                    delay,
+                )
+                time.sleep(delay)
+                delay *= 2
+                continue
             _log.error("Timeout downloading %s (%s)", filename, drive_id)
-            raise DownloadTimeoutError(drive_id, filename)
+            raise DownloadTimeoutError(drive_id, filename) from exc
+        except (requests.exceptions.ConnectionError, requests.exceptions.ChunkedEncodingError) as exc:
+            _safe_unlink(tmp_path)
+            if attempt < _MAX_RETRIES:
+                _log.warning(
+                    "Connection error on %s, retry %d/%d in %.0fs: %s",
+                    drive_id,
+                    attempt + 1,
+                    _MAX_RETRIES,
+                    delay,
+                    exc,
+                )
+                time.sleep(delay)
+                delay *= 2
+                continue
+            raise
         except requests.HTTPError as exc:
             _safe_unlink(tmp_path)
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if status in (403, 404):
                 _log.error("Permission denied: %s (%s)", filename, drive_id)
                 raise DownloadPermissionError(drive_id, filename) from exc
-            if _is_rate_limit_error(exc):
+            if _is_rate_limit_error(exc) or (status and status >= 500):
                 if attempt < _MAX_RETRIES:
                     _log.warning(
-                        "Rate limited on %s, retry %d/%d in %.0fs",
+                        "Rate limited / server error on %s, retry %d/%d in %.0fs",
                         drive_id,
                         attempt + 1,
                         _MAX_RETRIES,
@@ -179,6 +229,8 @@ def download_image(drive_id: str, dest_dir: Path, filename: str) -> Path:
                 raise DownloadRateLimitError() from exc
             raise
 
+    if last_timeout_exc:
+        raise DownloadTimeoutError(drive_id, filename) from last_timeout_exc
     raise DownloadRateLimitError()
 
 

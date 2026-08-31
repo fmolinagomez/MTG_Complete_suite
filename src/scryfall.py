@@ -83,7 +83,11 @@ def _throttled_get(url: str, params: dict | None = None) -> requests.Response:
             raise
         if resp.status_code != 429:
             return resp
-        retry_after = float(resp.headers.get("Retry-After", 2**attempt))
+        raw_retry = resp.headers.get("Retry-After")
+        try:
+            retry_after = float(raw_retry) if raw_retry is not None else float(2**attempt)
+        except (ValueError, TypeError):
+            retry_after = float(2**attempt)
         _log.warning(
             "Scryfall 429, reintentando en %.1fs (intento %d/%d)",
             retry_after,
@@ -112,15 +116,25 @@ def _extract_images(data: dict, quality: str) -> ScryfallCard:
     q = quality if quality in ("large", "png", "small", "normal") else "large"
     oracle_id = data.get("oracle_id")
     layout = data.get("layout", "")
-    if "image_uris" in data:
-        front = data["image_uris"].get(q) or data["image_uris"].get("large", "")
+    image_uris = data.get("image_uris")
+    card_faces = data.get("card_faces")
+
+    if image_uris and isinstance(image_uris, dict):
+        front = image_uris.get(q) or image_uris.get("large", "")
         if not front:
             raise ScryfallError("No se encontró imagen de frente en image_uris")
         return ScryfallCard(front, None, oracle_id, layout)
-    elif "card_faces" in data:
-        faces = data["card_faces"]
-        front = faces[0].get("image_uris", {}).get(q) or faces[0].get("image_uris", {}).get("large", "")
-        back = faces[1].get("image_uris", {}).get(q) or faces[1].get("image_uris", {}).get("large") if len(faces) > 1 else None
+    elif card_faces and isinstance(card_faces, list) and len(card_faces) > 0:
+        face0 = card_faces[0] if isinstance(card_faces[0], dict) else {}
+        face0_uris = face0.get("image_uris") if isinstance(face0.get("image_uris"), dict) else {}
+        front = face0_uris.get(q) or face0_uris.get("large", "")
+
+        back = None
+        if len(card_faces) > 1 and isinstance(card_faces[1], dict):
+            face1 = card_faces[1]
+            face1_uris = face1.get("image_uris") if isinstance(face1.get("image_uris"), dict) else {}
+            back = face1_uris.get(q) or face1_uris.get("large")
+
         if not front:
             raise ScryfallError("No se encontró imagen de frente en card_faces")
         return ScryfallCard(front, back, oracle_id, layout)
@@ -152,7 +166,7 @@ def fetch_card(
             raise ScryfallError(
                 f"Carta no encontrada en Scryfall: {set_code}/{collector_number} ({exc})"
             ) from exc
-        except requests.RequestException as exc:
+        except (requests.RequestException, ValueError) as exc:
             raise ScryfallError(
                 f"Error de conexión con Scryfall ({set_code}/{collector_number}): {exc}"
             ) from exc
@@ -230,7 +244,7 @@ def fetch_card_by_name(name: str) -> tuple[str, str]:
         data = resp.json()
     except requests.HTTPError as exc:
         raise ScryfallError(f"Carta no encontrada en Scryfall: {name} ({exc})") from exc
-    except requests.RequestException as exc:
+    except (requests.RequestException, ValueError) as exc:
         raise ScryfallError(f"Error de conexión con Scryfall ({name}): {exc}") from exc
 
     result = (str(data.get("set", "")).lower(), str(data.get("collector_number", "")))
@@ -275,7 +289,7 @@ def download_card_images(
         slug = f"{s_code.lower()}_{col_num}_{l_code}_{quality}"
         front_ext = _ext_from_url(sc_card.front_url)
         f_path = dest_dir / f"{slug}{front_ext}"
-        if not f_path.exists():
+        if not f_path.exists() or f_path.stat().st_size == 0:
             _log.info("Descargando imagen: %s", slug)
             resp = _throttled_get(sc_card.front_url)
             resp.raise_for_status()
@@ -285,7 +299,7 @@ def download_card_images(
         if sc_card.back_url:
             back_ext = _ext_from_url(sc_card.back_url)
             b_path = dest_dir / f"{slug}_back{back_ext}"
-            if not b_path.exists():
+            if not b_path.exists() or b_path.stat().st_size == 0:
                 _log.info("Descargando reverso MDFC: %s", slug)
                 resp = _throttled_get(sc_card.back_url)
                 resp.raise_for_status()

@@ -87,14 +87,14 @@ def _print_permission_error(e: DownloadPermissionError) -> None:
     print("Pide al creador que comparta las imágenes como «Público en Internet».", file=sys.stderr)
 
 
-def _setup_logging(log_path: Path, verbose: bool) -> None:
+def _setup_logging(log_path: Path, verbose: bool, quiet: bool = False) -> None:
     fmt = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
     handlers: list[logging.Handler] = [
         logging.FileHandler(log_path, encoding="utf-8"),
     ]
-    if verbose:
+    if verbose and not quiet:
         handlers.append(logging.StreamHandler(sys.stderr))
-    logging.basicConfig(level=logging.DEBUG, format=fmt, handlers=handlers)
+    logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO, format=fmt, handlers=handlers, force=True)
 
 
 def main() -> None:
@@ -172,7 +172,32 @@ def main() -> None:
         action="store_true",
         help="Mostrar mensajes de depuración en stderr además de escribirlos en el log.",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Número de hilos concurrentes para procesamiento (debe ser > 0).",
+    )
+    parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=None,
+        help="Tamaño de bloque para procesamiento (debe ser > 0).",
+    )
+    parser.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="Silenciar la salida por consola.",
+    )
     args = parser.parse_args()
+
+    if args.workers is not None and args.workers <= 0:
+        print("Error: --workers debe ser un número entero mayor que 0.", file=sys.stderr)
+        sys.exit(1)
+    if args.chunk_size is not None and args.chunk_size <= 0:
+        print("Error: --chunk-size debe ser un número entero mayor que 0.", file=sys.stderr)
+        sys.exit(1)
 
     local_fronts = _validate_local_images(args.local_fronts, "--local-fronts")
     local_backs = _validate_local_images(args.local_backs, "--local-backs")
@@ -215,29 +240,35 @@ def main() -> None:
         )
         sys.exit(1)
 
+    def _out(*p_args, **p_kwargs):
+        if not args.quiet:
+            print(*p_args, **p_kwargs)
+
     run_dir = out_dir / datetime.now().strftime("%d_%m_%Y_%H-%M-%S")
     run_dir.mkdir(parents=True, exist_ok=True)
-    _setup_logging(run_dir / "run.log", args.verbose)
+    _setup_logging(run_dir / "run.log", args.verbose, quiet=args.quiet)
 
     if xmls:
-        print(f"Encontrados {len(xmls)} XML(s) en '{xml_dir}'.")
+        _out(f"Encontrados {len(xmls)} XML(s) en '{xml_dir}'.")
     else:
-        print(f"Sin XMLs: generando PDF solo con {len(local_fronts)} imagen(es) local(es).")
+        _out(f"Sin XMLs: generando PDF solo con {len(local_fronts)} imagen(es) local(es).")
     if local_fronts:
         loc_msg = f"Imágenes locales: {len(local_fronts)} front(s)"
         if local_backs:
             loc_msg += f", {len(local_backs)} back(s) emparejados"
         if local_cardback:
             loc_msg += f", cardback local: {local_cardback.name}"
-        print(loc_msg)
-    print(f"Carpeta de salida: {run_dir}")
+        _out(loc_msg)
+    _out(f"Carpeta de salida: {run_dir}")
 
     reports = analyze(xmls) if xmls else []
     for r in reports:
-        print(
+        _out(
             f"  - {r.path.name}: {r.cards} cartas"
             + (f"  ({r.blanks} hueco(s) en blanco)" if r.has_blanks else "")
         )
+
+    progress_fn = (lambda st, d, t: None) if args.quiet else _progress
 
     # --- Verify Drive access before downloading ----------------------------
     if xmls:
@@ -247,38 +278,38 @@ def main() -> None:
         n_cached = len(all_ids) - len(to_check)
         if to_check:
             cache_note = f"  ({n_cached} en caché)" if n_cached else ""
-            print(f"\nVerificando XML{cache_note}:")
-            _progress(Stage.VERIFY, 0, len(to_check))
+            _out(f"\nVerificando XML{cache_note}:")
+            progress_fn(Stage.VERIFY, 0, len(to_check))
             inaccessible = check_drive_access(
                 to_check,
-                progress_callback=lambda d, t: _progress(Stage.VERIFY, d, t),
+                progress_callback=lambda d, t: progress_fn(Stage.VERIFY, d, t),
             )
             if inaccessible:
-                print()
-                print(f"Aviso: {len(inaccessible)} carta(s) sin acceso público en Google Drive:")
+                _out()
+                _out(f"Aviso: {len(inaccessible)} carta(s) sin acceso público en Google Drive:")
                 for _, name in inaccessible:
-                    print(f"  • {name}")
+                    _out(f"  • {name}")
                 if not args.yes:
-                    print()
+                    _out()
                     ans = input("¿Continuar de todos modos? [s/N]: ").strip().lower()
                     if ans not in ("s", "si", "sí", "y", "yes"):
-                        print("Cancelado.")
+                        _out("Cancelado.")
                         return
         elif n_cached:
-            print(f"\nVerificando XML: omitida ({n_cached} imagen(es) ya en caché)")
+            _out(f"\nVerificando XML: omitida ({n_cached} imagen(es) ya en caché)")
 
     plan_ = plan(reports, local_count=len(local_fronts)) if reports else None
 
     if plan_ is not None:
         warning = format_warning(plan_)
         if warning and not args.yes:
-            print()
-            print(warning)
+            _out()
+            _out(warning)
             ans = input("¿Continuar? [s/N]: ").strip().lower()
             if ans not in ("s", "si", "sí", "y", "yes"):
-                print("Cancelado.")
+                _out("Cancelado.")
                 return
-    print()
+    _out()
 
     overall_start = time.time()
 
@@ -296,14 +327,14 @@ def main() -> None:
                 last_job_name = plan_.jobs[-1].base_name
                 if job_name == last_job_name and local_fronts:
                     label += f" + {len(local_fronts)} local(es)"
-                print(f"\nGenerando PDF: {label}")
+                _out(f"\nGenerando PDF: {label}")
                 _stage_started_at.clear()
 
             pdfs = run_plan(
                 plan_.jobs,
                 run_dir,
                 workdir,
-                _progress,
+                progress_fn,
                 cancel_event=None,
                 extra_fronts=local_fronts or None,
                 extra_backs=local_backs or None,
@@ -313,11 +344,14 @@ def main() -> None:
                 fronts_only=args.fronts_only,
             )
             for p in pdfs:
-                size_mb = p.stat().st_size / (1024 * 1024)
-                print(f"  -> {p}  ({size_mb:.1f} MB)")
+                if p.exists():
+                    size_mb = p.stat().st_size / (1024 * 1024)
+                    _out(f"  -> {p}  ({size_mb:.1f} MB)")
+                else:
+                    _out(f"  -> {p}")
         else:
             # No XMLs: a single locals-only job.
-            print(f"\nProcesando: {args.locals_base_name} (solo imágenes locales)")
+            _out(f"\nProcesando: {args.locals_base_name} (solo imágenes locales)")
             _stage_started_at.clear()
             all_locals = [*local_fronts, *local_backs]
             if local_cardback is not None:
@@ -328,15 +362,24 @@ def main() -> None:
                 run_dir,
                 args.locals_base_name,
                 workdir,
-                _progress,
+                progress_fn,
                 extra_backs=local_backs or None,
                 local_crop_map={p: args.local_needs_crop for p in all_locals},
                 fronts_only=args.fronts_only,
             )
             for p in pdfs:
-                size_mb = p.stat().st_size / (1024 * 1024)
-                print(f"  -> {p}  ({size_mb:.1f} MB)")
+                if p.exists():
+                    size_mb = p.stat().st_size / (1024 * 1024)
+                    _out(f"  -> {p}  ({size_mb:.1f} MB)")
+                else:
+                    _out(f"  -> {p}")
 
+    except KeyboardInterrupt:
+        if not args.quiet:
+            print("\nProceso cancelado por el usuario.", file=sys.stderr)
+        if not args.test:
+            _cleanup(workdir)
+        sys.exit(130)
     except DownloadPermissionError as e:
         _print_permission_error(e)
         sys.exit(1)
@@ -355,16 +398,16 @@ def main() -> None:
 
     manifest = write_manifest(plan_, reports, run_dir) if plan_ is not None else None
     if manifest:
-        print(f"\nResumen de fusiones escrito en: {manifest}")
+        _out(f"\nResumen de fusiones escrito en: {manifest}")
 
     total_elapsed = time.time() - overall_start
-    print(f"\nTiempo total: {total_elapsed:.1f}s")
+    _out(f"\nTiempo total: {total_elapsed:.1f}s")
 
     if args.test:
-        print("Modo --test: imágenes conservadas en workdir/ (raw y bled).")
+        _out("Modo --test: imágenes conservadas en workdir/ (raw y bled).")
     else:
         _cleanup(workdir)
-        print("Imágenes temporales (workdir/raw y workdir/bled) eliminadas.")
+        _out("Imágenes temporales (workdir/raw y workdir/bled) eliminadas.")
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ CARD_W_IN = 2.5
 BLEED_X_FRAC = 0.042
 
 def check_image_quality(
-    image_path: Path,
+    image_path: Path | str,
     blur_threshold: float,
     check_brightness_contrast: bool = True,
 ) -> tuple[bool, float, tuple[int, int]]:
@@ -23,11 +23,14 @@ def check_image_quality(
     
     Returns (is_ok, focus_score, (width, height)).
     """
+    image_path = Path(image_path)
     # 1. Integrity check using PIL
     try:
         with Image.open(image_path) as img:
             img.load()
             w, h = img.size
+            if w <= 0 or h <= 0:
+                return False, 0.0, (w, h)
     except Exception as e:
         _log.warning("Imagen corrupta en control de calidad %s: %s", image_path.name, e)
         return False, 0.0, (0, 0)
@@ -45,11 +48,16 @@ def check_image_quality(
         _log.warning("Resolución insuficiente en control de calidad %s: %dx%d (%d DPI)", image_path.name, w, h, dpi_cropped)
         return False, 0.0, (w, h)
 
-    # 4. Decoded image checks (OpenCV)
+    # 4. Decoded image checks (OpenCV with PIL RGB fallback)
     img_cv = cv2.imread(str(image_path))
     if img_cv is None:
-        _log.warning("Error OpenCV al decodificar %s", image_path.name)
-        return False, 0.0, (w, h)
+        try:
+            with Image.open(image_path) as pil_img:
+                rgb = pil_img.convert("RGB")
+                img_cv = cv2.cvtColor(np.array(rgb), cv2.COLOR_RGB2BGR)
+        except Exception:
+            _log.warning("Error OpenCV al decodificar %s", image_path.name)
+            return False, 0.0, (w, h)
 
     gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
 
@@ -75,11 +83,40 @@ def check_image_quality(
     return True, focus_score, (w, h)
 
 
-def analyze_single_image(file_path: Path, check_brightness_contrast: bool = True) -> dict:
+def is_blurry(image_path: Path | str, threshold: float = 100.0) -> tuple[bool, float]:
+    """Check if an image is blurry. Returns (is_blurry, focus_score).
+    On corrupt/unreadable files, returns (False, 0.0) without crashing.
+    """
+    try:
+        image_path = Path(image_path)
+        img_cv = cv2.imread(str(image_path))
+        if img_cv is None:
+            with Image.open(image_path) as pil_img:
+                rgb = pil_img.convert("RGB")
+                img_cv = cv2.cvtColor(np.array(rgb), cv2.COLOR_RGB2BGR)
+        gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+        focus_score = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+        return (focus_score < threshold), focus_score
+    except Exception as e:
+        _log.warning("Error assessing blur for %s: %s", image_path, e)
+        return False, 0.0
+
+
+def assess_image_quality(
+    image_path: Path | str,
+    blur_threshold: float = 100.0,
+    check_brightness_contrast: bool = True,
+) -> tuple[bool, float, tuple[int, int]]:
+    """Assess image quality. Standard alias for check_image_quality."""
+    return check_image_quality(image_path, blur_threshold, check_brightness_contrast)
+
+
+def analyze_single_image(file_path: Path | str, check_brightness_contrast: bool = True) -> dict:
     """Analyze a single image and calculate detailed quality metrics.
     
     Returns a dictionary of formatted results matching the requirements of image_quality_analyzer.py.
     """
+    file_path = Path(file_path)
     res = {
         "filepath": str(file_path),
         "filename": file_path.name,
@@ -99,6 +136,10 @@ def analyze_single_image(file_path: Path, check_brightness_contrast: bool = True
             with Image.open(file_path) as img:
                 img.load()
                 w, h = img.size
+                if w <= 0 or h <= 0:
+                    res["integrity"] = "Dimensiones inválidas"
+                    res["is_ok"] = False
+                    return res
         except Exception as e:
             res["integrity"] = f"Corrupto: {e}"
             res["is_ok"] = False
@@ -127,17 +168,22 @@ def analyze_single_image(file_path: Path, check_brightness_contrast: bool = True
             res["aspect"] = f"{ratio:.3f} (Incorrecto)"
             res["is_ok"] = False
 
-        # OpenCV checks
+        # OpenCV checks with PIL RGB fallback
         img_cv = cv2.imread(str(file_path))
         if img_cv is None:
-            res["integrity"] = "Error OpenCV: No se pudo decodificar"
-            res["is_ok"] = False
-            return res
+            try:
+                with Image.open(file_path) as pil_img:
+                    rgb = pil_img.convert("RGB")
+                    img_cv = cv2.cvtColor(np.array(rgb), cv2.COLOR_RGB2BGR)
+            except Exception:
+                res["integrity"] = "Error OpenCV: No se pudo decodificar"
+                res["is_ok"] = False
+                return res
 
         gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
 
         # 4. Nitidez
-        lap_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+        lap_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
         if lap_var >= 300:
             sharp_label = "Alta (Nítido)"
         elif lap_var >= 100:
@@ -148,8 +194,8 @@ def analyze_single_image(file_path: Path, check_brightness_contrast: bool = True
         res["sharpness"] = f"{lap_var:.1f} ({sharp_label})"
 
         # 5. Brillo y Contraste
-        mean_val = np.mean(gray)
-        std_val = np.std(gray)
+        mean_val = float(np.mean(gray))
+        std_val = float(np.std(gray))
 
         if check_brightness_contrast:
             if mean_val < 50:

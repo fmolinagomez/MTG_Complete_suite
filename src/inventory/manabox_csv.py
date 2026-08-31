@@ -16,24 +16,32 @@ FOIL_VALUES = frozenset({"foil", "etched", "foil_etched", "true", "1", "yes"})
 
 def _normalize_header(header: str) -> str:
     """Normalize CSV header strings for fuzzy mapping."""
-    return header.strip().lower().replace("_", " ").replace("-", " ")
+    return header.strip("\ufeff \t\r\n").lower().replace("_", " ").replace("-", " ")
 
 
 def parse_manabox_csv(source: Path | str | io.TextIOBase) -> list[InventoryCard]:
     """Parse a ManaBox CSV export into a list of InventoryCard objects."""
     content: str
     if isinstance(source, Path):
-        try:
-            content = source.read_text(encoding="utf-8-sig")
-        except UnicodeDecodeError:
-            content = source.read_text(encoding="latin-1")
+        for enc in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+            try:
+                content = source.read_text(encoding=enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            content = source.read_text(encoding="latin-1", errors="replace")
     elif isinstance(source, str):
         if source.strip() and not ("\n" in source or "," in source) and Path(source).is_file():
             path = Path(source)
-            try:
-                content = path.read_text(encoding="utf-8-sig")
-            except UnicodeDecodeError:
-                content = path.read_text(encoding="latin-1")
+            for enc in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+                try:
+                    content = path.read_text(encoding=enc)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            else:
+                content = path.read_text(encoding="latin-1", errors="replace")
         else:
             content = source
     else:
@@ -67,19 +75,31 @@ def parse_manabox_csv(source: Path | str | io.TextIOBase) -> list[InventoryCard]
         if not row or not any(cell.strip() for cell in row):
             continue
 
-        name = get_field(row, "Name", "Card Name")
+        name = get_field(row, "Name", "Card Name", "Card", "Cardname")
         if not name:
             continue
 
-        set_code = get_field(row, "Set code", "Set", "Expansion", "Edition").lower()
-        collector_number = get_field(row, "Collector number", "Number", "Card Number", "Collector Number")
-        raw_qty = get_field(row, "Quantity", "Count", "Qty", default="1")
+        set_code = get_field(row, "Set code", "Set", "Expansion", "Edition", "Set Code").lower()
+        collector_number = get_field(
+            row,
+            "Collector number",
+            "Number",
+            "Card Number",
+            "Collector Number",
+            "Collector #",
+            "Card #",
+            "Collector No",
+            "Collector No.",
+        )
+        raw_qty = get_field(row, "Quantity", "Count", "Qty", "Quantity Owned", default="1")
         try:
-            quantity = max(1, int(raw_qty))
+            quantity = int(raw_qty)
+            if quantity <= 0:
+                continue
         except ValueError:
             quantity = 1
 
-        raw_foil = get_field(row, "Foil", "Foil / Etched", "Finish", "Is Foil", default="")
+        raw_foil = get_field(row, "Foil", "Foil / Etched", "Finish", "Is Foil", "Foil/Etched", default="")
         is_foil = raw_foil.lower() in FOIL_VALUES
 
         condition = get_field(row, "Condition", "Card Condition", default="NM")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import logging
 import queue
@@ -9,7 +10,8 @@ import threading
 import tkinter as tk
 from collections.abc import Callable
 from dataclasses import dataclass
-from tkinter import messagebox, ttk
+from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
 from typing import TYPE_CHECKING
 
 from PIL import Image, ImageDraw, ImageTk
@@ -198,6 +200,11 @@ class ValidatorView(ttk.Frame):
             summary_frame, textvariable=self.summary_var, font=("Segoe UI", 9)
         )
         summary_lbl.pack(side=tk.LEFT)
+
+        self.export_btn = ttk.Button(
+            summary_frame, text="Exportar CSV", command=self._on_export_csv_click
+        )
+        self.export_btn.pack(side=tk.RIGHT, padx=4)
 
         # Tab 2: Dynamic JSON Frame (not added to Notebook by default)
         self.json_tab = ttk.Frame(self.notebook)
@@ -498,6 +505,49 @@ class ValidatorView(ttk.Frame):
         self.summary_var.set(
             f"Mazo: {deck_name} | Total: {total} | Válidas: {valid} | Advertencias: {warning} | Errores: {error}"
         )
+
+    def _on_export_csv_click(self) -> None:
+        if not self.current_deck_cards:
+            messagebox.showwarning("Aviso", "No hay cartas validadas para exportar.", parent=self)
+            return
+
+        file_path = filedialog.asksaveasfilename(
+            parent=self,
+            title="Exportar resultados de validación a CSV",
+            defaultextension=".csv",
+            filetypes=[("Archivos CSV", "*.csv"), ("Todos los archivos", "*.*")],
+        )
+        if not file_path:
+            return
+
+        self.export_to_csv(file_path)
+
+    def export_to_csv(self, file_path: str | Path) -> None:
+        if not self.current_deck_cards:
+            return
+
+        path = Path(file_path)
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(
+                ["Nombre", "Cantidad", "Zona", "Edición", "Nº", "Tipo", "Rareza", "Estado", "Detalles"]
+            )
+            zone_map = {"main": "Principal", "side": "Sideboard", "token": "Token"}
+            for res in self.current_deck_cards:
+                zone_disp = zone_map.get(res.card.zone, res.card.zone)
+                writer.writerow(
+                    [
+                        res.card.name,
+                        res.card.quantity,
+                        zone_disp,
+                        res.set_code.upper() if res.set_code else "",
+                        res.collector_number,
+                        res.type_line,
+                        res.rarity.capitalize() if res.rarity else "",
+                        res.status,
+                        res.details,
+                    ]
+                )
 
     def _on_row_selected(self, event) -> None:
         selected = self.tree.selection()
