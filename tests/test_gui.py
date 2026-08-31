@@ -30,10 +30,11 @@ def tk_root():
 
 @pytest.fixture
 def app(tk_root):
-    """Fresh App instance; GUI state is reset by the fixture."""
-    from gui.main import App
+    """Fresh GeneratorView instance; GUI state is reset by the fixture."""
+    from gui.views.generator_view import GeneratorView
 
-    a = App(tk_root)
+    a = GeneratorView(tk_root)
+    a.pack()
     yield a
     # Clean up widgets added during the test
     for w in tk_root.winfo_children():
@@ -251,7 +252,7 @@ class TestCropChange:
 
 class TestMtgBackChange:
     def _add_deck(self, app, url="https://moxfield.com/decks/abc"):
-        from gui.main import MtgUrlDeck
+        from gui.views.generator_view import MtgUrlDeck
         from src.deck_importer import DeckCard
 
         deck = MtgUrlDeck(url=url, cards=[DeckCard("Forest", "m21", "1", 1, "main")])
@@ -300,7 +301,7 @@ class TestMtgBackChange:
 
 class TestMtgUrlDeckActiveCount:
     def test_active_count_filters_invalid_token_layouts(self):
-        from gui.main import MtgUrlDeck
+        from gui.views.generator_view import MtgUrlDeck
         from src.deck_importer import DeckCard
         
         cards = [
@@ -318,7 +319,7 @@ class TestMtgUrlDeckActiveCount:
         assert deck.active_count == 4
 
     def test_active_count_deduplicates_tokens(self):
-        from gui.main import MtgUrlDeck
+        from gui.views.generator_view import MtgUrlDeck
         from src.deck_importer import DeckCard
         
         cards = [
@@ -410,7 +411,7 @@ class TestSeparatorBackResolution:
         from pathlib import Path
         from unittest.mock import patch
 
-        from gui.main import MtgUrlDeck
+        from gui.views.generator_view import MtgUrlDeck
         from src.deck_importer import DeckCard
 
         # 1. Setup the deck
@@ -461,11 +462,11 @@ class TestSeparatorBackResolution:
 
         # Mock dependencies
         with (
-            patch("gui.main.work_dir", return_value=tmp_path),
-            patch("gui.main.scryfall_download", return_value=dl_results),
+            patch("gui.views.generator_view.work_dir", return_value=tmp_path),
+            patch("gui.views.generator_view.scryfall_download", return_value=dl_results),
             patch.object(app, "_create_separator_image") as mock_create_sep,
-            patch("gui.main.run_locals_only", side_effect=mock_run_locals_only),
-            patch("gui.main.resources_dir", return_value=tmp_path)
+            patch("gui.views.generator_view.run_locals_only", side_effect=mock_run_locals_only),
+            patch("gui.views.generator_view.resources_dir", return_value=tmp_path)
         ):
             # Create a mock mtg default back file
             mtg_default_back = tmp_path / "backs" / "mtg" / "back.jpg"
@@ -497,7 +498,7 @@ class TestSeparatorBackResolution:
         from pathlib import Path
         from unittest.mock import patch
 
-        from gui.main import MtgUrlDeck
+        from gui.views.generator_view import MtgUrlDeck
         from src.deck_importer import DeckCard
 
         # 1. Setup the deck
@@ -542,11 +543,11 @@ class TestSeparatorBackResolution:
 
         # Mock dependencies
         with (
-            patch("gui.main.work_dir", return_value=tmp_path),
-            patch("gui.main.scryfall_download", return_value=dl_results),
+            patch("gui.views.generator_view.work_dir", return_value=tmp_path),
+            patch("gui.views.generator_view.scryfall_download", return_value=dl_results),
             patch.object(app, "_create_separator_image") as mock_create_sep,
-            patch("gui.main.run_locals_only", side_effect=mock_run_locals_only),
-            patch("gui.main.resources_dir", return_value=tmp_path)
+            patch("gui.views.generator_view.run_locals_only", side_effect=mock_run_locals_only),
+            patch("gui.views.generator_view.resources_dir", return_value=tmp_path)
         ):
             # Create a mock mtg default back file
             mtg_default_back = tmp_path / "backs" / "mtg" / "back.jpg"
@@ -576,7 +577,7 @@ class TestSeparatorBackResolution:
     def test_base_name_uses_sanitized_deck_name_when_single_deck(self, app, tmp_path):
         from unittest.mock import patch
 
-        from gui.main import MtgUrlDeck
+        from gui.views.generator_view import MtgUrlDeck
         from src.deck_importer import DeckCard
 
         commander = DeckCard("Jace", "m21", "1", 1, "main", is_commander=True)
@@ -604,10 +605,10 @@ class TestSeparatorBackResolution:
             return [Path("output.pdf")]
 
         with (
-            patch("gui.main.work_dir", return_value=tmp_path),
-            patch("gui.main.scryfall_download", return_value=dl_results),
-            patch("gui.main.run_locals_only", side_effect=mock_run_locals_only),
-            patch("gui.main.resources_dir", return_value=tmp_path)
+            patch("gui.views.generator_view.work_dir", return_value=tmp_path),
+            patch("gui.views.generator_view.scryfall_download", return_value=dl_results),
+            patch("gui.views.generator_view.run_locals_only", side_effect=mock_run_locals_only),
+            patch("gui.views.generator_view.resources_dir", return_value=tmp_path)
         ):
             mtg_default_back = tmp_path / "backs" / "mtg" / "back.jpg"
             mtg_default_back.parent.mkdir(parents=True, exist_ok=True)

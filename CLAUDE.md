@@ -66,15 +66,13 @@ MPCFillToPDF/
 │   ├── pipeline.py            # Orchestrates the full flow
 │   ├── deck_importer.py       # Multi-platform deck parser
 │   ├── scryfall.py            # Scryfall API client & local image caching
-│   └── quality.py             # Focus & resolution quality assessment
-├── gui/
-│   ├── main.py                # GUI entry point launching gui.app.App
-│   ├── app.py                 # Single-window container, top nav bar, and frame switcher
-│   ├── paths.py               # Runtime dir resolution (MPCFillToPDF/inventario.db, output, cache)
-│   ├── components/            # Reusable widgets (nav_bar, card_preview_hover, status_bar)
-│   └── views/                 # Modular screens (hub_view, generator_view, validator_view, inventory_view)
-├── cli/
-│   └── main.py                # CLI: batch-processes xml/*.xml into out/
+├── src/                       # Domain engines & pipelines (PrintPipeline, StockAllocationEngine, DeckIngestionEngine)
+│   ├── inventory/             # SQLite inventory storage, ManaBox parser & StockAllocationEngine
+│   └── engine/                # Thread-safe background TaskManager & Tkinter event loop bridge
+├── gui/                       # Desktop application (single-window App & NavBar)
+│   ├── components/            # Reusable UI components (NavBar, CardHoverPreview, GameScraperTab)
+│   └── views/                 # Modular views (HubView, InventoryView, GeneratorView, ValidatorView, SettingsView)
+├── cli/                       # Headless CLI entrypoint (python -m cli.main)
 ├── build_exe.py               # PyInstaller build script (produces dist/MPCFillToPDF.exe)
 ├── xml/                       # Drop .xml inputs here (CLI mode)
 ├── MPCFillToPDF/              # Runtime folder next to .exe or in root; gitignored
@@ -83,7 +81,7 @@ MPCFillToPDF/
 │   └── procesamiento/         # Download cache, previews/, intermediate files
 ├── docs/                      # Architectural reviews, ADRs, and implementation plans
 │   └── adr/                   # Architecture Decision Records
-└── tests/                     # Unit and integration test suites (740+ tests)
+└── tests/                     # Unit and integration test suites (772+ tests)
 ```
 
 ### Environment management (uv)

@@ -9,8 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from gui.components.card_preview_hover import CardHoverPreview
-from gui.main import MtgUrlDeck
-from gui.views.generator_view import GeneratorView
+from gui.views.generator_view import GeneratorView, MtgUrlDeck
 from gui.views.validator_view import CardValidationResult, ValidatorView
 from src.deck_importer import DeckCard
 from src.engine.task_manager import TaskManager

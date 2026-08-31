@@ -1,7 +1,7 @@
 import tkinter as tk
 from unittest.mock import MagicMock, patch
 
-from gui.moxfield_validator import ValidatorApp
+from gui.views.validator_view import ValidatorView
 from src.deck_importer import DeckCard
 
 
@@ -33,8 +33,8 @@ class TestCardValidationLogic:
         # Test ValidatorApp validation method directly without tkinter loop
         root = tk.Tk()
         try:
-            app = ValidatorApp(root)
-            with patch("gui.moxfield_validator._fetch_raw_card_data", return_value=mock_data):
+            app = ValidatorView(root)
+            with patch("gui.views.validator_view._fetch_raw_card_data", return_value=mock_data):
                 res = app._validate_single_card(card)
                 
             assert res.status == "🟢 Válido"
@@ -61,9 +61,9 @@ class TestCardValidationLogic:
         
         root = tk.Tk()
         try:
-            app = ValidatorApp(root)
-            with patch("gui.moxfield_validator.fetch_card_by_name", return_value=("vma", "4")), \
-                 patch("gui.moxfield_validator._fetch_raw_card_data", return_value=mock_data):
+            app = ValidatorView(root)
+            with patch("gui.views.validator_view.fetch_card_by_name", return_value=("vma", "4")), \
+                 patch("gui.views.validator_view._fetch_raw_card_data", return_value=mock_data):
                 res = app._validate_single_card(card)
                 
             assert res.status == "⚠️ Advertencia"
@@ -90,8 +90,8 @@ class TestCardValidationLogic:
         
         root = tk.Tk()
         try:
-            app = ValidatorApp(root)
-            with patch("gui.moxfield_validator._fetch_raw_card_data", return_value=mock_data):
+            app = ValidatorView(root)
+            with patch("gui.views.validator_view._fetch_raw_card_data", return_value=mock_data):
                 res = app._validate_single_card(card)
                 
             assert res.status == "⚠️ Advertencia"
@@ -116,8 +116,8 @@ class TestCardValidationLogic:
         
         root = tk.Tk()
         try:
-            app = ValidatorApp(root)
-            with patch("gui.moxfield_validator._fetch_raw_card_data", return_value=mock_data):
+            app = ValidatorView(root)
+            with patch("gui.views.validator_view._fetch_raw_card_data", return_value=mock_data):
                 res = app._validate_single_card(card)
                 
             assert res.status == "⚠️ Advertencia"
@@ -143,8 +143,8 @@ class TestCardValidationLogic:
         
         root = tk.Tk()
         try:
-            app = ValidatorApp(root)
-            with patch("gui.moxfield_validator._fetch_raw_card_data", return_value=mock_data):
+            app = ValidatorView(root)
+            with patch("gui.views.validator_view._fetch_raw_card_data", return_value=mock_data):
                 res = app._validate_single_card(card)
                 
             assert res.status == "🟢 Válido"
@@ -159,8 +159,8 @@ class TestCardValidationLogic:
         
         root = tk.Tk()
         try:
-            app = ValidatorApp(root)
-            with patch("gui.moxfield_validator._fetch_raw_card_data", side_effect=Exception("Not found")):
+            app = ValidatorView(root)
+            with patch("gui.views.validator_view._fetch_raw_card_data", side_effect=Exception("Not found")):
                 res = app._validate_single_card(card)
                 
             assert res.status == "🔴 Error"
@@ -186,8 +186,8 @@ class TestCardValidationLogic:
         
         root = tk.Tk()
         try:
-            app = ValidatorApp(root)
-            with patch("gui.moxfield_validator._fetch_raw_card_data", return_value=mock_data):
+            app = ValidatorView(root)
+            with patch("gui.views.validator_view._fetch_raw_card_data", return_value=mock_data):
                 res = app._validate_single_card(card)
                 
             assert res.status == "🟢 Válido"
@@ -213,8 +213,8 @@ class TestCardValidationLogic:
         
         root = tk.Tk()
         try:
-            app = ValidatorApp(root)
-            with patch("gui.moxfield_validator._fetch_raw_card_data", return_value=mock_data):
+            app = ValidatorView(root)
+            with patch("gui.views.validator_view._fetch_raw_card_data", return_value=mock_data):
                 res = app._validate_single_card(card)
                 
             assert res.status == "⚠️ Advertencia"

@@ -25,13 +25,17 @@ try:
 except ImportError:
     _WINDND_AVAILABLE = False
 
-from gui.locals_tab import LocalsTabMixin
-from gui.lorcana_tab import LorcanaTabMixin
-from gui.main import AppState, MtgUrlDeck
-from gui.op_tab import OPTabMixin
+from dataclasses import dataclass, field
+
 from gui.paths import app_base_dir, output_dir, work_dir
-from gui.rb_tab import RBTabMixin
-from gui.settings_tab import SettingsTabMixin
+from gui.views.generator_tabs import (
+    LocalsTabMixin,
+    LorcanaTabMixin,
+    OPTabMixin,
+    RBTabMixin,
+    SettingsTabMixin,
+    XmlTabMixin,
+)
 from gui.widgets import (
     APP_TITLE,
     STAGE_LABELS,
@@ -40,10 +44,10 @@ from gui.widgets import (
     load_tab_icon,
     notify,
 )
-from gui.xml_tab import XmlTabMixin
 from src.app_settings import AppSettings, load_settings
 from src.cancellation import Cancelled
 from src.constants import CARDS_PER_PAGE, Stage
+from src.deck_importer import DeckCard
 from src.downloader import (
     DownloadPartialError,
     DownloadPermissionError,
@@ -75,6 +79,62 @@ from src.validator import ValidationWarning
 
 if TYPE_CHECKING:
     from src.engine.task_manager import TaskManager
+
+@dataclass
+class MtgUrlDeck:
+    url: str
+    cards: list[DeckCard]
+    include_side: bool = False
+    include_tokens: bool = False
+    name: str = ""
+    back_path: Path | None = None
+    format: str = "commander"
+    include_separator: bool = False
+
+    @property
+    def display_name(self) -> str:
+        if self.name:
+            return self.name
+        try:
+            platform = self.url.split("/")[2].replace("www.", "")
+            slug = self.url.rstrip("/").split("/")[-1]
+            return f"{platform}/{slug}"
+        except IndexError:
+            return self.url[:40]
+
+    @property
+    def active_count(self) -> int:
+        main_side_count = sum(
+            c.quantity
+            for c in self.cards
+            if c.zone == "main"
+            or (c.zone == "side" and self.include_side)
+        )
+        token_count = 0
+        if self.include_tokens:
+            seen_tokens = set()
+            for c in self.cards:
+                if c.zone == "token" and c.layout in ("token", "emblem", "double_faced_token"):
+                    key = ((c.set_code or "").lower(), c.collector_number or "")
+                    if key not in seen_tokens:
+                        seen_tokens.add(key)
+                        token_count += 1
+        base = main_side_count + token_count
+        if self.include_separator:
+            base += 1
+        return base
+
+
+@dataclass
+class AppState:
+    xml_paths: list[Path] = field(default_factory=list)
+    local_fronts: list[Path] = field(default_factory=list)
+    local_backs: list[Path] = field(default_factory=list)
+    front_back_paths: list[Path | None] = field(default_factory=list)
+    local_front_crop: list[bool] = field(default_factory=list)
+    local_back_crop: list[bool] = field(default_factory=list)
+    mtg_url_decks: list[MtgUrlDeck] = field(default_factory=list)
+
 
 _log = logging.getLogger(__name__)
 

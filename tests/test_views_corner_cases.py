@@ -92,7 +92,7 @@ class TestGeneratorViewCornerCases:
         txt_file.write_text("not an xml", encoding="utf-8")
         png_file = make_rgb_image(tmp_path / "image.png")
 
-        with patch("gui.xml_tab.analyze", return_value=[]), patch("gui.xml_tab.parse", return_value=None):
+        with patch("gui.views.generator_tabs.analyze", return_value=[]), patch("gui.views.generator_tabs.parse", return_value=None):
             view._on_drop_xmls([str(xml_file), str(txt_file), str(png_file)])
 
         assert len(view.state.xml_paths) == 1

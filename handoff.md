@@ -30,16 +30,12 @@ All features for Advanced Collection Filtering, Natural Column Sorting, Card Dec
 - **Domain Glossary**: [CONTEXT.md](file:///Users/molins/Dev/MPCFillToPDF/CONTEXT.md)
 - **Developer Guide & Project Structure**: [CLAUDE.md](file:///Users/molins/Dev/MPCFillToPDF/CLAUDE.md)
 - **Project Overview & Setup**: [README.md](file:///Users/molins/Dev/MPCFillToPDF/README.md)
-- **Test Suite**: 740 passing tests covering 100% of domain services, corner-case resilience, and GUI components.
-- **Corner-Case Test Suites**:
-  - `tests/test_scryfall_corner_cases.py` (Rate limits HTTP 429, zero-byte cache recovery, MDFC without back URIs, digital-only cards).
-  - `tests/test_quality_and_image_corner_cases.py` (0-byte corrupt files, color modes P/1/LA/CMYK, Laplacian variance on solid colors).
-  - `tests/test_downloader_resilience.py` (Timeouts, connection drops with backoff, Google Drive virus warning pages).
-  - `tests/test_pipeline_corner_cases.py` (Cancellation mid-step, 0-card generation, exact chunking boundaries).
-  - `tests/test_inventory_corner_cases.py` (BOM/Latin-1/Windows-1252 CSVs, non-standard headers, Option C multi-deck allocation).
-  - `tests/test_cli_corner_cases.py` (Argument validation <=0, quiet mode, missing XML handling, SIGINT/130 exit).
-  - `tests/test_hover_preview_corner_cases.py` (Screen boundary tooltip flips, rapid mouse motion debounce, async error safety).
-  - `tests/test_views_corner_cases.py` (Drag-and-drop filtering, PDF collision handling, validator CSV export).
+- **Test Suite**: 772 passing tests covering 100% of domain services, corner-case resilience, GUI views, and allocation engines.
+- **Deepened Architecture Modules**:
+  - `src/deck_importer.py` (`GameDeckAdapter` strategy engine for MTG, Lorcana, One Piece, Riftbound with centralized networking & caching in `src/scraper_utils.py`).
+  - `src/pipeline.py` (`PrintPipeline.execute(PrintJobSpec) -> PrintJobResult` unifying drive checks, cropping, layout, chunking, and manifests).
+  - `src/inventory/allocation_engine.py` (`StockAllocationEngine` and `AllocationPolicy` providing pure in-memory card matching and multi-deck stock solver).
+  - `gui/views/generator_tabs.py` & `gui/components/generator_scraper_tab.py` (Modular sub-tabs replacing monolithic legacy tab layer; clean `gui/main.py` entrypoint).
 
 ---
 

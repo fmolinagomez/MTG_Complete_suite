@@ -1,9 +1,10 @@
 import hashlib
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
+from typing import Any
 
 from src.app_settings import (
     DEFAULT_CUT_LINE_COLOR,
@@ -14,7 +15,7 @@ from src.app_settings import (
     DEFAULT_CUT_LINE_WIDTH,
 )
 from src.cancellation import Cancelled
-from src.constants import JobPdfStartCallback, Stage, StageCallback
+from src.constants import JobPdfStartCallback, SpeedCallback, Stage, StageCallback
 from src.cropper import process_for_pdf
 from src.deck_importer import fetch_deck
 from src.downloader import (
@@ -30,6 +31,87 @@ from src.scryfall import ScryfallError, download_deck_images
 
 CROP_THREADS = 5
 _log = logging.getLogger(__name__)
+
+
+@dataclass
+class PrintJobSpec:
+    """Specification defining a complete print job or batch of print jobs."""
+
+    # Sources
+    xml_paths: list[str | Path] = field(default_factory=list)
+    jobs: list[Any] = field(default_factory=list)
+    extra_fronts: list[str | Path] = field(default_factory=list)
+    extra_backs: list[str | Path | None] = field(default_factory=list)
+    local_cardback: str | Path | None = None
+    deck_url: str | None = None
+
+    # Deck URL options
+    include_sideboard: bool = False
+    deck_lang: str = "en"
+    deck_quality: str = "large"
+    deck_fail_policy: str = "english"
+    deck_quality_check: bool = True
+    deck_blur_threshold: float = 100.0
+
+    # Output & Working Directories
+    output_dir: str | Path = Path(".")
+    work_dir: str | Path = Path("workdir")
+    base_name: str = "deck"
+
+    # Bleed & Crop options
+    local_crop_map: dict[Path, bool] = field(default_factory=dict)
+    crop_threads: int = CROP_THREADS
+
+    # Layout & Cut line options
+    fronts_only: bool = False
+    cut_line_color: str = DEFAULT_CUT_LINE_COLOR
+    cut_line_style: str = DEFAULT_CUT_LINE_STYLE
+    cut_line_width: float = DEFAULT_CUT_LINE_WIDTH
+    cut_line_over_cards: bool = DEFAULT_CUT_LINE_OVER_CARDS
+    cut_line_over_fronts: bool = DEFAULT_CUT_LINE_OVER_FRONTS
+    cut_line_over_backs: bool = DEFAULT_CUT_LINE_OVER_BACKS
+
+    # Cancellation & Progress Callbacks
+    cancel_event: Event | None = None
+    on_job_pdf_start: JobPdfStartCallback = None
+    on_xml_download_progress: StageCallback = None
+    on_xml_crop_progress: StageCallback = None
+    on_speed_update: SpeedCallback = None
+
+
+@dataclass
+class PrintJobResult:
+    """Result of executing a PrintJobSpec through PrintPipeline."""
+
+    pdf_paths: list[Path] = field(default_factory=list)
+    manifest: dict[str, Any] = field(default_factory=dict)
+
+    def __iter__(self):
+        return iter(self.pdf_paths)
+
+    def __len__(self) -> int:
+        return len(self.pdf_paths)
+
+    def __getitem__(self, index: int) -> Path:
+        return self.pdf_paths[index]
+
+
+@dataclass
+class _PlanJob:
+    xml_paths: list[Path]
+    base_name: str
+
+
+@dataclass
+class _JobData:
+    base_name: str
+    ordered_slots: list[int]
+    front_slot_to_id: dict[int, str]
+    back_slot_to_id: dict[int, str]
+    local_id_to_path: dict[str, Path]
+    id_name_map: dict[str, str]
+    drive_id_context: dict[str, tuple[str, int]]
+    xml_needed_ids: dict[str, set[str]]
 
 
 def _check_cancel(cancel_event: Event | None) -> None:
@@ -89,120 +171,12 @@ def _run_crop_parallel(
     return id_to_bled
 
 
-def run(
-    xml_path: str | Path,
-    output_dir: str | Path,
-    work_dir: str | Path = "workdir",
-    progress_callback: StageCallback = None,
-    cancel_event: Event | None = None,
-    extra_fronts: list[str | Path] | None = None,
-    extra_backs: list[str | Path | None] | None = None,
-    local_crop_map: dict[Path, bool] | None = None,
-    fronts_only: bool = False,
-) -> list[Path]:
-    """Single-XML pipeline: XML → one or more PDFs named after the XML stem.
-
-    `extra_fronts` and `extra_backs` are optional local image paths. The fronts
-    are appended after the XML cards; each pairs with the back at the same
-    index, or falls back to the XML's default cardback when no paired back is
-    supplied.
-
-    `local_crop_map` lets each local image choose whether to apply the MPC
-    bleed crop. Missing entries default to `False` (no crop).
-    """
-    xml_path = Path(xml_path)
-    return _run_xmls(
-        [xml_path],
-        xml_path.stem,
-        output_dir,
-        work_dir,
-        progress_callback,
-        cancel_event,
-        extra_fronts=extra_fronts,
-        extra_backs=extra_backs,
-        local_crop_map=local_crop_map,
-        fronts_only=fronts_only,
-    )
-
-
-def run_merged(
-    xml_paths: list[str | Path],
-    output_dir: str | Path,
-    base_name: str,
-    work_dir: str | Path = "workdir",
-    progress_callback: StageCallback = None,
-    cancel_event: Event | None = None,
-    extra_fronts: list[str | Path] | None = None,
-    extra_backs: list[str | Path | None] | None = None,
-    local_crop_map: dict[Path, bool] | None = None,
-    fronts_only: bool = False,
-) -> list[Path]:
-    """Multi-XML pipeline: concatenate the XMLs' fronts in order and emit one
-    or more PDFs named `<base_name>.pdf` (or `<base_name>_1.pdf`, … when split).
-    Each card keeps its own back (from its own XML).
-
-    `extra_fronts` / `extra_backs` behave as in `run`; the first XML's
-    cardback is the fallback when no paired back is supplied.
-    """
-    paths = [Path(p) for p in xml_paths]
-    return _run_xmls(
-        paths,
-        base_name,
-        output_dir,
-        work_dir,
-        progress_callback,
-        cancel_event,
-        extra_fronts=extra_fronts,
-        extra_backs=extra_backs,
-        local_crop_map=local_crop_map,
-        fronts_only=fronts_only,
-    )
-
-
-def run_locals_only(
-    extra_fronts: list[str | Path],
-    local_cardback: str | Path,
-    output_dir: str | Path,
-    base_name: str,
-    work_dir: str | Path = "workdir",
-    progress_callback: StageCallback = None,
-    cancel_event: Event | None = None,
-    extra_backs: list[str | Path | None] | None = None,
-    local_crop_map: dict[Path, bool] | None = None,
-    fronts_only: bool = False,
-    cut_line_color: str = DEFAULT_CUT_LINE_COLOR,
-    cut_line_style: str = DEFAULT_CUT_LINE_STYLE,
-    cut_line_width: float = DEFAULT_CUT_LINE_WIDTH,
-    cut_line_over_cards: bool = DEFAULT_CUT_LINE_OVER_CARDS,
-    cut_line_over_fronts: bool = DEFAULT_CUT_LINE_OVER_FRONTS,
-    cut_line_over_backs: bool = DEFAULT_CUT_LINE_OVER_BACKS,
-) -> list[Path]:
-    """Generate PDF(s) only from local images (no XML).
-
-    A `local_cardback` image is required — it's used for every front that
-    doesn't have a paired back in `extra_backs`.
-    """
-    if not extra_fronts:
-        raise ValueError("run_locals_only requires at least one front image.")
-    return _run_xmls(
-        [],
-        base_name,
-        output_dir,
-        work_dir,
-        progress_callback,
-        cancel_event,
-        extra_fronts=extra_fronts,
-        extra_backs=extra_backs,
-        local_cardback=local_cardback,
-        local_crop_map=local_crop_map,
-        fronts_only=fronts_only,
-        cut_line_color=cut_line_color,
-        cut_line_style=cut_line_style,
-        cut_line_width=cut_line_width,
-        cut_line_over_cards=cut_line_over_cards,
-        cut_line_over_fronts=cut_line_over_fronts,
-        cut_line_over_backs=cut_line_over_backs,
-    )
+def _local_synthetic_id(path: Path) -> str:
+    """Stable synthetic 'drive ID' for a local file, derived from its absolute
+    path. The hash keeps it short, filesystem-safe, and cache-friendly across
+    re-runs of the same file."""
+    h = hashlib.sha1(str(path.resolve()).encode("utf-8")).hexdigest()[:12]
+    return f"local_{h}"
 
 
 def _build_slot_maps(
@@ -270,189 +244,30 @@ def _build_slot_maps(
     )
 
 
-def _local_synthetic_id(path: Path) -> str:
-    """Stable synthetic 'drive ID' for a local file, derived from its absolute
-    path. The hash keeps it short, filesystem-safe, and cache-friendly across
-    re-runs of the same file."""
-    h = hashlib.sha1(str(path.resolve()).encode("utf-8")).hexdigest()[:12]
-    return f"local_{h}"
-
-
-def _run_xmls(
-    xml_paths: list[Path],
-    base_name: str,
-    output_dir: str | Path,
-    work_dir: str | Path,
-    progress_callback: StageCallback = None,
-    cancel_event: Event | None = None,
-    extra_fronts: list[str | Path] | None = None,
-    extra_backs: list[str | Path | None] | None = None,
-    local_cardback: str | Path | None = None,
-    local_crop_map: dict[Path, bool] | None = None,
-    fronts_only: bool = False,
-    cut_line_color: str = DEFAULT_CUT_LINE_COLOR,
-    cut_line_style: str = DEFAULT_CUT_LINE_STYLE,
-    cut_line_width: float = DEFAULT_CUT_LINE_WIDTH,
-    cut_line_over_cards: bool = DEFAULT_CUT_LINE_OVER_CARDS,
-    cut_line_over_fronts: bool = DEFAULT_CUT_LINE_OVER_FRONTS,
-    cut_line_over_backs: bool = DEFAULT_CUT_LINE_OVER_BACKS,
-) -> list[Path]:
-    extra_fronts = [Path(p) for p in (extra_fronts or [])]
-    # extra_backs is parallel to extra_fronts; entries may be None to mean
-    # "use the fallback cardback" (so GUI/CLI callers can mix explicit per-front
-    # backs with implicit defaults).
-    extra_backs_raw = list(extra_backs or [])
-    extra_backs = [Path(p) if p is not None else None for p in extra_backs_raw]
-    local_cardback_path = Path(local_cardback) if local_cardback else None
-    crop_map: dict[Path, bool] = {Path(k): bool(v) for k, v in (local_crop_map or {}).items()}
-
-    output_dir = Path(output_dir)
-    work_dir = Path(work_dir)
-    raw_dir = work_dir / "raw"
-    bled_dir = work_dir / "bled"
-
-    def _cb(stage):
-        def _inner(done, total):
-            if progress_callback:
-                progress_callback(stage, done, total)
-
-        return _inner
-
-    # 1. Parse all XMLs and concatenate slots into one global numbering.
-    orders: list[CardOrder] = [parse(p) for p in xml_paths]
-
-    if not orders and not extra_fronts:
-        raise ValueError("Se requiere al menos un XML o imágenes locales.")
-    if not orders and local_cardback_path is None:
-        raise ValueError("Sin XML se requiere un cardback local (--local-cardback).")
-
-    local_id_to_path: dict[str, Path] = {}
-    front_slot_to_id, back_slot_to_id, id_name_map, drive_id_context, _, next_slot = (
-        _build_slot_maps(xml_paths, orders, 0)
-    )
-
-    # Cardback fallback used for local fronts without a paired back.
-    if local_cardback_path is not None:
-        fallback_cardback_id = _local_synthetic_id(local_cardback_path)
-        local_id_to_path[fallback_cardback_id] = local_cardback_path
-    else:
-        fallback_cardback_id = orders[0].cardback_id
-
-    for i, fp in enumerate(extra_fronts):
-        sid = _local_synthetic_id(fp)
-        local_id_to_path[sid] = fp
-        new_slot = next_slot
-        next_slot += 1
-        front_slot_to_id[new_slot] = sid
-        bp = extra_backs[i] if i < len(extra_backs) else None
-        if bp is not None:
-            bsid = _local_synthetic_id(bp)
-            local_id_to_path[bsid] = bp
-            back_slot_to_id[new_slot] = bsid
-        else:
-            back_slot_to_id[new_slot] = fallback_cardback_id
-
-    _check_cancel(cancel_event)
-
-    # 2. Download (skip local IDs — they're already on disk).
-    download_pairs = [
-        (did, name) for did, name in id_name_map.items() if did not in local_id_to_path
-    ]
-    _log.info(
-        "Phase 2 — download: %d images (%d local)", len(download_pairs), len(local_id_to_path)
-    )
-
-    if progress_callback and download_pairs:
-        progress_callback(Stage.DOWNLOAD, 0, len(download_pairs))
-    try:
-        id_to_raw = download_all(
-            download_pairs,
-            raw_dir,
-            _cb(Stage.DOWNLOAD),
-            cancel_event=cancel_event,
-        )
-    except DownloadPartialError as e:
-        for drive_id, _ in e.permission_errors + e.timeout_errors:
-            ctx = drive_id_context.get(drive_id)
-            if ctx:
-                e.xml_context[drive_id] = ctx
-        raise
-    except (DownloadPermissionError, DownloadTimeoutError) as e:
-        ctx = drive_id_context.get(e.drive_id)
-        if ctx:
-            e.xml_name, e.position = ctx
-        raise
-    id_to_raw.update(local_id_to_path)
-
-    # 3. Crop + mirror bleed (parallel)
-    _log.info("Phase 3 — crop: %d images", len(id_to_raw))
-    crop_tasks = _build_crop_tasks(id_to_raw, bled_dir, local_id_to_path, crop_map)
-
-    def _on_crop(drive_id: str, done: int, total: int) -> None:
-        if progress_callback:
-            progress_callback(Stage.CROP, done, total)
-
-    if progress_callback and crop_tasks:
-        progress_callback(Stage.CROP, 0, len(crop_tasks))
-    id_to_bled = _run_crop_parallel(crop_tasks, cancel_event, on_done=_on_crop)
-
-    _check_cancel(cancel_event)
-
-    # 4. Generate PDF(s)
-    _log.info("Phase 4 — generate PDF: %s (%d slots)", base_name, len(front_slot_to_id))
-    ordered_slots = sorted(front_slot_to_id.keys())
-    return generate(
-        output_dir,
-        base_name,
-        ordered_slots,
-        front_slot_to_id,
-        back_slot_to_id,
-        id_to_bled,
-        progress_callback=_cb(Stage.PDF),
-        cancel_event=cancel_event,
-        fronts_only=fronts_only,
-        cut_line_color=cut_line_color,
-        cut_line_style=cut_line_style,
-        cut_line_width=cut_line_width,
-        cut_line_over_cards=cut_line_over_cards,
-        cut_line_over_fronts=cut_line_over_fronts,
-        cut_line_over_backs=cut_line_over_backs,
-    )
-
-
-# ---------------------------------------------------------------------------
-# run_plan — download-first multi-job orchestration
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class _JobData:
-    base_name: str
-    ordered_slots: list[int]
-    front_slot_to_id: dict[int, str]
-    back_slot_to_id: dict[int, str]
-    local_id_to_path: dict[str, Path]
-    id_name_map: dict[str, str]
-    drive_id_context: dict[str, tuple[str, int]]
-    xml_needed_ids: dict[str, set[str]]
-
-
 def _build_job_data(
     xml_paths: list[Path],
     base_name: str,
     next_slot: int,
     extra_fronts: list[Path],
     extra_backs: list[Path | None],
+    local_cardback_path: Path | None = None,
 ) -> tuple[_JobData, int]:
     """Parse XMLs and build all slot maps for one job.
     Returns (job_data, updated next_slot). Does not download or crop anything."""
     orders = [parse(p) for p in xml_paths]
-    fallback_cardback_id = orders[0].cardback_id if orders else ""
 
     local_id_to_path: dict[str, Path] = {}
     front_slot_to_id, back_slot_to_id, id_name_map, drive_id_context, xml_needed_ids, next_slot = (
         _build_slot_maps(xml_paths, orders, next_slot)
     )
+
+    if local_cardback_path is not None:
+        fallback_cardback_id = _local_synthetic_id(local_cardback_path)
+        local_id_to_path[fallback_cardback_id] = local_cardback_path
+    elif orders:
+        fallback_cardback_id = orders[0].cardback_id
+    else:
+        fallback_cardback_id = ""
 
     for i, fp in enumerate(extra_fronts):
         sid = _local_synthetic_id(fp)
@@ -480,6 +295,423 @@ def _build_job_data(
     ), next_slot
 
 
+class PrintPipeline:
+    """Unified orchestration pipeline for print jobs."""
+
+    def __init__(self, crop_threads: int = CROP_THREADS):
+        self.crop_threads = crop_threads
+
+    @classmethod
+    def execute(
+        cls,
+        spec: PrintJobSpec,
+        progress_callback: StageCallback = None,
+    ) -> PrintJobResult:
+        """Deep entrypoint for executing a print job specification."""
+        pipeline = cls(crop_threads=spec.crop_threads)
+        return pipeline.run_job(spec, progress_callback=progress_callback)
+
+    def run_job(
+        self,
+        spec: PrintJobSpec,
+        progress_callback: StageCallback = None,
+    ) -> PrintJobResult:
+        _check_cancel(spec.cancel_event)
+
+        output_dir = Path(spec.output_dir)
+        work_dir = Path(spec.work_dir)
+        raw_dir = work_dir / "raw"
+        bled_dir = work_dir / "bled"
+
+        extra_fronts_p = [Path(p) for p in (spec.extra_fronts or [])]
+        extra_backs_p = [Path(p) if p is not None else None for p in (spec.extra_backs or [])]
+        local_cardback_path = Path(spec.local_cardback) if spec.local_cardback else None
+        crop_map: dict[Path, bool] = {
+            Path(k): bool(v) for k, v in (spec.local_crop_map or {}).items()
+        }
+        base_name = spec.base_name
+
+        def _cb(stage: str):
+            def _inner(done: int, total: int):
+                if progress_callback:
+                    progress_callback(stage, done, total)
+
+            return _inner
+
+        # 0. Handle deck URL if provided
+        if spec.deck_url:
+            scryfall_dir = work_dir / "scryfall"
+            fetched = fetch_deck(spec.deck_url)
+            if fetched.name and fetched.name.strip():
+                base_name = sanitize_filename(fetched.name)
+
+            cards = [
+                c
+                for c in fetched.cards
+                if c.zone == "main" or (spec.include_sideboard and c.zone == "side")
+            ]
+            if not cards:
+                raise ValueError("El mazo importado no contiene cartas.")
+
+            def _dl_progress(done: int, total: int) -> None:
+                if progress_callback:
+                    progress_callback(Stage.DOWNLOAD, done, total)
+
+            if progress_callback:
+                progress_callback(Stage.DOWNLOAD, 0, len(cards))
+
+            try:
+                dl_results = download_deck_images(
+                    cards,
+                    scryfall_dir,
+                    _dl_progress,
+                    spec.cancel_event,
+                    lang=spec.deck_lang,
+                    quality=spec.deck_quality,
+                    fail_policy=spec.deck_fail_policy,
+                    quality_check=spec.deck_quality_check,
+                    blur_threshold=spec.deck_blur_threshold,
+                )
+            except ScryfallError as exc:
+                raise ValueError(f"Error al descargar imágenes de Scryfall: {exc}") from exc
+
+            _check_cancel(spec.cancel_event)
+
+            mtg_back = resources_dir() / "backs" / "mtg" / "back.jpg"
+            local_cardback_path = mtg_back
+
+            for card, front_path, back_path in dl_results:
+                crop_map[front_path] = False
+                if back_path:
+                    crop_map[back_path] = False
+                for _ in range(card.quantity):
+                    extra_fronts_p.append(front_path)
+                    extra_backs_p.append(back_path)
+
+        # 1. Determine job definitions
+        if spec.jobs:
+            jobs_to_run = spec.jobs
+        elif spec.xml_paths:
+            jobs_to_run = [
+                _PlanJob(xml_paths=[Path(p) for p in spec.xml_paths], base_name=base_name)
+            ]
+        elif extra_fronts_p:
+            jobs_to_run = [_PlanJob(xml_paths=[], base_name=base_name)]
+        else:
+            raise ValueError("Se requiere al menos un XML o imágenes locales.")
+
+        has_any_xml = any(bool(getattr(j, "xml_paths", [])) for j in jobs_to_run)
+        if not has_any_xml and local_cardback_path is None:
+            raise ValueError("Sin XML se requiere un cardback local (--local-cardback).")
+
+        # Phase 1: parse all jobs and build slot maps
+        job_data_list: list[_JobData] = []
+        combined_id_name: dict[str, str] = {}
+        combined_locals: dict[str, Path] = {}
+        combined_context: dict[str, tuple[str, int]] = {}
+        combined_xml_ids: dict[str, set[str]] = {}
+        next_slot = 0
+        last_idx = len(jobs_to_run) - 1
+
+        for i, job in enumerate(jobs_to_run):
+            is_last = i == last_idx
+            ef = extra_fronts_p if is_last else []
+            eb = extra_backs_p if is_last else []
+
+            jd, next_slot = _build_job_data(
+                xml_paths=[Path(p) for p in job.xml_paths],
+                base_name=job.base_name,
+                next_slot=next_slot,
+                extra_fronts=ef,
+                extra_backs=eb,
+                local_cardback_path=local_cardback_path,
+            )
+            job_data_list.append(jd)
+            combined_id_name.update(jd.id_name_map)
+            combined_locals.update(jd.local_id_to_path)
+            combined_context.update(jd.drive_id_context)
+            for xml_name, ids in jd.xml_needed_ids.items():
+                combined_xml_ids.setdefault(xml_name, set()).update(ids)
+
+        _check_cancel(spec.cancel_event)
+
+        # Phase 2: download all remote images
+        download_pairs = [
+            (did, name) for did, name in combined_id_name.items() if did not in combined_locals
+        ]
+
+        _dl_ids_set = {did for did, _ in download_pairs}
+        _xml_totals = {
+            name: len(ids & _dl_ids_set)
+            for name, ids in combined_xml_ids.items()
+            if ids & _dl_ids_set
+        }
+        _xml_done: dict[str, int] = {name: 0 for name in _xml_totals}
+        _dl_id_to_xml: dict[str, list[str]] = {}
+        for _xname, _xids in combined_xml_ids.items():
+            if _xname in _xml_totals:
+                for _did in _xids & _dl_ids_set:
+                    _dl_id_to_xml.setdefault(_did, []).append(_xname)
+
+        def _on_image_done(drive_id: str) -> None:
+            if not spec.on_xml_download_progress:
+                return
+            for xml_name in _dl_id_to_xml.get(drive_id, []):
+                _xml_done[xml_name] += 1
+                spec.on_xml_download_progress(
+                    xml_name, _xml_done[xml_name], _xml_totals[xml_name]
+                )
+
+        if progress_callback and download_pairs:
+            progress_callback(Stage.DOWNLOAD, 0, len(download_pairs))
+        try:
+            id_to_raw = download_all(
+                download_pairs,
+                raw_dir,
+                _cb(Stage.DOWNLOAD),
+                cancel_event=spec.cancel_event,
+                on_image_done=_on_image_done,
+                on_speed_update=spec.on_speed_update,
+            )
+        except DownloadPartialError as e:
+            for drive_id, _ in e.permission_errors + e.timeout_errors:
+                ctx = combined_context.get(drive_id)
+                if ctx:
+                    e.xml_context[drive_id] = ctx
+            raise
+        except (DownloadPermissionError, DownloadTimeoutError) as e:
+            ctx = combined_context.get(e.drive_id)
+            if ctx:
+                e.xml_name, e.position = ctx
+            raise
+        id_to_raw.update(combined_locals)
+
+        _check_cancel(spec.cancel_event)
+
+        # Phase 3: crop all images (parallel)
+        _raw_ids_set = set(id_to_raw.keys())
+        _xml_crop_totals = {
+            name: len(ids & _raw_ids_set)
+            for name, ids in combined_xml_ids.items()
+            if ids & _raw_ids_set
+        }
+        _xml_crop_done: dict[str, int] = {name: 0 for name in _xml_crop_totals}
+        _crop_id_to_xml: dict[str, list[str]] = {}
+        for _xname, _xids in combined_xml_ids.items():
+            if _xname in _xml_crop_totals:
+                for _did in _xids & _raw_ids_set:
+                    _crop_id_to_xml.setdefault(_did, []).append(_xname)
+
+        crop_tasks = _build_crop_tasks(id_to_raw, bled_dir, combined_locals, crop_map)
+
+        def _on_crop_plan(drive_id: str, done: int, total: int) -> None:
+            if progress_callback:
+                progress_callback(Stage.CROP, done, total)
+            if spec.on_xml_crop_progress:
+                for xml_name in _crop_id_to_xml.get(drive_id, []):
+                    _xml_crop_done[xml_name] += 1
+                    spec.on_xml_crop_progress(
+                        xml_name, _xml_crop_done[xml_name], _xml_crop_totals[xml_name]
+                    )
+
+        if progress_callback and crop_tasks:
+            progress_callback(Stage.CROP, 0, len(crop_tasks))
+        id_to_bled = _run_crop_parallel(crop_tasks, spec.cancel_event, on_done=_on_crop_plan)
+
+        _check_cancel(spec.cancel_event)
+
+        # Phase 4: generate PDFs for each job
+        all_outputs: list[Path] = []
+        total_jobs = len(job_data_list)
+        total_cards = 0
+        for job_idx, jd in enumerate(job_data_list, start=1):
+            _check_cancel(spec.cancel_event)
+            if spec.on_job_pdf_start:
+                spec.on_job_pdf_start(job_idx, total_jobs, jd.base_name)
+            outputs = generate(
+                output_dir,
+                jd.base_name,
+                jd.ordered_slots,
+                jd.front_slot_to_id,
+                jd.back_slot_to_id,
+                id_to_bled,
+                progress_callback=_cb(Stage.PDF),
+                cancel_event=spec.cancel_event,
+                fronts_only=spec.fronts_only,
+                cut_line_color=spec.cut_line_color,
+                cut_line_style=spec.cut_line_style,
+                cut_line_width=spec.cut_line_width,
+                cut_line_over_cards=spec.cut_line_over_cards,
+                cut_line_over_fronts=spec.cut_line_over_fronts,
+                cut_line_over_backs=spec.cut_line_over_backs,
+            )
+            all_outputs.extend(outputs)
+            total_cards += len(jd.ordered_slots)
+
+        manifest = {
+            "total_jobs": total_jobs,
+            "total_cards": total_cards,
+            "pdf_paths": [str(p) for p in all_outputs],
+            "job_names": [jd.base_name for jd in job_data_list],
+        }
+
+        return PrintJobResult(pdf_paths=all_outputs, manifest=manifest)
+
+
+def _run_xmls(
+    xml_paths: list[Path],
+    base_name: str,
+    output_dir: str | Path,
+    work_dir: str | Path,
+    progress_callback: StageCallback = None,
+    cancel_event: Event | None = None,
+    extra_fronts: list[str | Path] | None = None,
+    extra_backs: list[str | Path | None] | None = None,
+    local_cardback: str | Path | None = None,
+    local_crop_map: dict[Path, bool] | None = None,
+    fronts_only: bool = False,
+    cut_line_color: str = DEFAULT_CUT_LINE_COLOR,
+    cut_line_style: str = DEFAULT_CUT_LINE_STYLE,
+    cut_line_width: float = DEFAULT_CUT_LINE_WIDTH,
+    cut_line_over_cards: bool = DEFAULT_CUT_LINE_OVER_CARDS,
+    cut_line_over_fronts: bool = DEFAULT_CUT_LINE_OVER_FRONTS,
+    cut_line_over_backs: bool = DEFAULT_CUT_LINE_OVER_BACKS,
+) -> list[Path]:
+    spec = PrintJobSpec(
+        xml_paths=xml_paths,
+        base_name=base_name,
+        output_dir=output_dir,
+        work_dir=work_dir,
+        cancel_event=cancel_event,
+        extra_fronts=extra_fronts or [],
+        extra_backs=extra_backs or [],
+        local_cardback=local_cardback,
+        local_crop_map=local_crop_map or {},
+        fronts_only=fronts_only,
+        cut_line_color=cut_line_color,
+        cut_line_style=cut_line_style,
+        cut_line_width=cut_line_width,
+        cut_line_over_cards=cut_line_over_cards,
+        cut_line_over_fronts=cut_line_over_fronts,
+        cut_line_over_backs=cut_line_over_backs,
+    )
+    return PrintPipeline.execute(spec, progress_callback=progress_callback).pdf_paths
+
+
+def run(
+    xml_path: str | Path,
+    output_dir: str | Path,
+    work_dir: str | Path = "workdir",
+    progress_callback: StageCallback = None,
+    cancel_event: Event | None = None,
+    extra_fronts: list[str | Path] | None = None,
+    extra_backs: list[str | Path | None] | None = None,
+    local_crop_map: dict[Path, bool] | None = None,
+    fronts_only: bool = False,
+) -> list[Path]:
+    """Single-XML pipeline: XML → one or more PDFs named after the XML stem.
+
+    `extra_fronts` and `extra_backs` are optional local image paths. The fronts
+    are appended after the XML cards; each pairs with the back at the same
+    index, or falls back to the XML's default cardback when no paired back is
+    supplied.
+
+    `local_crop_map` lets each local image choose whether to apply the MPC
+    bleed crop. Missing entries default to `False` (no crop).
+    """
+    xml_path = Path(xml_path)
+    spec = PrintJobSpec(
+        xml_paths=[xml_path],
+        base_name=xml_path.stem,
+        output_dir=output_dir,
+        work_dir=work_dir,
+        cancel_event=cancel_event,
+        extra_fronts=extra_fronts or [],
+        extra_backs=extra_backs or [],
+        local_crop_map=local_crop_map or {},
+        fronts_only=fronts_only,
+    )
+    return PrintPipeline.execute(spec, progress_callback=progress_callback).pdf_paths
+
+
+def run_merged(
+    xml_paths: list[str | Path],
+    output_dir: str | Path,
+    base_name: str,
+    work_dir: str | Path = "workdir",
+    progress_callback: StageCallback = None,
+    cancel_event: Event | None = None,
+    extra_fronts: list[str | Path] | None = None,
+    extra_backs: list[str | Path | None] | None = None,
+    local_crop_map: dict[Path, bool] | None = None,
+    fronts_only: bool = False,
+) -> list[Path]:
+    """Multi-XML pipeline: concatenate the XMLs' fronts in order and emit one
+    or more PDFs named `<base_name>.pdf` (or `<base_name>_1.pdf`, … when split).
+    Each card keeps its own back (from its own XML).
+
+    `extra_fronts` / `extra_backs` behave as in `run`; the first XML's
+    cardback is the fallback when no paired back is supplied.
+    """
+    spec = PrintJobSpec(
+        xml_paths=[Path(p) for p in xml_paths],
+        base_name=base_name,
+        output_dir=output_dir,
+        work_dir=work_dir,
+        cancel_event=cancel_event,
+        extra_fronts=extra_fronts or [],
+        extra_backs=extra_backs or [],
+        local_crop_map=local_crop_map or {},
+        fronts_only=fronts_only,
+    )
+    return PrintPipeline.execute(spec, progress_callback=progress_callback).pdf_paths
+
+
+def run_locals_only(
+    extra_fronts: list[str | Path],
+    local_cardback: str | Path,
+    output_dir: str | Path,
+    base_name: str,
+    work_dir: str | Path = "workdir",
+    progress_callback: StageCallback = None,
+    cancel_event: Event | None = None,
+    extra_backs: list[str | Path | None] | None = None,
+    local_crop_map: dict[Path, bool] | None = None,
+    fronts_only: bool = False,
+    cut_line_color: str = DEFAULT_CUT_LINE_COLOR,
+    cut_line_style: str = DEFAULT_CUT_LINE_STYLE,
+    cut_line_width: float = DEFAULT_CUT_LINE_WIDTH,
+    cut_line_over_cards: bool = DEFAULT_CUT_LINE_OVER_CARDS,
+    cut_line_over_fronts: bool = DEFAULT_CUT_LINE_OVER_FRONTS,
+    cut_line_over_backs: bool = DEFAULT_CUT_LINE_OVER_BACKS,
+) -> list[Path]:
+    """Generate PDF(s) only from local images (no XML).
+
+    A `local_cardback` image is required — it's used for every front that
+    doesn't have a paired back in `extra_backs`.
+    """
+    if not extra_fronts:
+        raise ValueError("run_locals_only requires at least one front image.")
+    spec = PrintJobSpec(
+        extra_fronts=extra_fronts,
+        local_cardback=local_cardback,
+        output_dir=output_dir,
+        base_name=base_name,
+        work_dir=work_dir,
+        cancel_event=cancel_event,
+        extra_backs=extra_backs or [],
+        local_crop_map=local_crop_map or {},
+        fronts_only=fronts_only,
+        cut_line_color=cut_line_color,
+        cut_line_style=cut_line_style,
+        cut_line_width=cut_line_width,
+        cut_line_over_cards=cut_line_over_cards,
+        cut_line_over_fronts=cut_line_over_fronts,
+        cut_line_over_backs=cut_line_over_backs,
+    )
+    return PrintPipeline.execute(spec, progress_callback=progress_callback).pdf_paths
+
+
 def run_plan(
     jobs: list,
     output_dir: str | Path,
@@ -493,7 +725,7 @@ def run_plan(
     on_xml_download_progress: StageCallback = None,
     on_xml_crop_progress: StageCallback = None,
     fronts_only: bool = False,
-    on_speed_update=None,
+    on_speed_update: SpeedCallback = None,
     cut_line_color: str = DEFAULT_CUT_LINE_COLOR,
     cut_line_style: str = DEFAULT_CUT_LINE_STYLE,
     cut_line_width: float = DEFAULT_CUT_LINE_WIDTH,
@@ -510,161 +742,27 @@ def run_plan(
     on_xml_crop_progress(xml_name, done, total) is called after each image
     crop completes, with the per-XML running totals.
     """
-    output_dir = Path(output_dir)
-    work_dir = Path(work_dir)
-    raw_dir = work_dir / "raw"
-    bled_dir = work_dir / "bled"
-
-    extra_fronts_p = [Path(p) for p in (extra_fronts or [])]
-    extra_backs_p = [Path(p) if p is not None else None for p in (extra_backs or [])]
-    crop_map: dict[Path, bool] = {Path(k): bool(v) for k, v in (local_crop_map or {}).items()}
-
-    def _cb(stage):
-        def _inner(done, total):
-            if progress_callback:
-                progress_callback(stage, done, total)
-
-        return _inner
-
-    # --- Phase 1: parse all jobs ------------------------------------------------
-    job_data_list: list[_JobData] = []
-    combined_id_name: dict[str, str] = {}
-    combined_locals: dict[str, Path] = {}
-    combined_context: dict[str, tuple[str, int]] = {}
-    combined_xml_ids: dict[str, set[str]] = {}
-    next_slot = 0
-    last_idx = len(jobs) - 1
-
-    for i, job in enumerate(jobs):
-        is_last = i == last_idx
-        ef = extra_fronts_p if is_last else []
-        eb = extra_backs_p if is_last else []
-
-        jd, next_slot = _build_job_data(
-            xml_paths=[Path(p) for p in job.xml_paths],
-            base_name=job.base_name,
-            next_slot=next_slot,
-            extra_fronts=ef,
-            extra_backs=eb,
-        )
-        job_data_list.append(jd)
-        combined_id_name.update(jd.id_name_map)
-        combined_locals.update(jd.local_id_to_path)
-        combined_context.update(jd.drive_id_context)
-        for xml_name, ids in jd.xml_needed_ids.items():
-            combined_xml_ids.setdefault(xml_name, set()).update(ids)
-
-    _check_cancel(cancel_event)
-
-    # --- Phase 2: download all images -------------------------------------------
-    download_pairs = [
-        (did, name) for did, name in combined_id_name.items() if did not in combined_locals
-    ]
-
-    # Per-XML download progress tracking
-    _dl_ids_set = {did for did, _ in download_pairs}
-    _xml_totals = {
-        name: len(ids & _dl_ids_set) for name, ids in combined_xml_ids.items() if ids & _dl_ids_set
-    }
-    _xml_done: dict[str, int] = {name: 0 for name in _xml_totals}
-    # Precompute reverse map: drive_id → xml_names that track it (O(1) dispatch)
-    _dl_id_to_xml: dict[str, list[str]] = {}
-    for _xname, _xids in combined_xml_ids.items():
-        if _xname in _xml_totals:
-            for _did in _xids & _dl_ids_set:
-                _dl_id_to_xml.setdefault(_did, []).append(_xname)
-
-    def _on_image_done(drive_id: str) -> None:
-        if not on_xml_download_progress:
-            return
-        for xml_name in _dl_id_to_xml.get(drive_id, []):
-            _xml_done[xml_name] += 1
-            on_xml_download_progress(xml_name, _xml_done[xml_name], _xml_totals[xml_name])
-
-    if progress_callback and download_pairs:
-        progress_callback(Stage.DOWNLOAD, 0, len(download_pairs))
-    try:
-        id_to_raw = download_all(
-            download_pairs,
-            raw_dir,
-            _cb(Stage.DOWNLOAD),
-            cancel_event=cancel_event,
-            on_image_done=_on_image_done,
-            on_speed_update=on_speed_update,
-        )
-    except DownloadPartialError as e:
-        for drive_id, _ in e.permission_errors + e.timeout_errors:
-            ctx = combined_context.get(drive_id)
-            if ctx:
-                e.xml_context[drive_id] = ctx
-        raise
-    except (DownloadPermissionError, DownloadTimeoutError) as e:
-        ctx = combined_context.get(e.drive_id)
-        if ctx:
-            e.xml_name, e.position = ctx
-        raise
-    id_to_raw.update(combined_locals)
-
-    _check_cancel(cancel_event)
-
-    # --- Phase 3: crop all images (parallel) ------------------------------------
-    # Per-XML crop progress tracking
-    _raw_ids_set = set(id_to_raw.keys())
-    _xml_crop_totals = {
-        name: len(ids & _raw_ids_set)
-        for name, ids in combined_xml_ids.items()
-        if ids & _raw_ids_set
-    }
-    _xml_crop_done: dict[str, int] = {name: 0 for name in _xml_crop_totals}
-    _crop_id_to_xml: dict[str, list[str]] = {}
-    for _xname, _xids in combined_xml_ids.items():
-        if _xname in _xml_crop_totals:
-            for _did in _xids & _raw_ids_set:
-                _crop_id_to_xml.setdefault(_did, []).append(_xname)
-
-    crop_tasks = _build_crop_tasks(id_to_raw, bled_dir, combined_locals, crop_map)
-
-    def _on_crop_plan(drive_id: str, done: int, total: int) -> None:
-        if progress_callback:
-            progress_callback(Stage.CROP, done, total)
-        if on_xml_crop_progress:
-            for xml_name in _crop_id_to_xml.get(drive_id, []):
-                _xml_crop_done[xml_name] += 1
-                on_xml_crop_progress(xml_name, _xml_crop_done[xml_name], _xml_crop_totals[xml_name])
-
-    if progress_callback and crop_tasks:
-        progress_callback(Stage.CROP, 0, len(crop_tasks))
-    id_to_bled = _run_crop_parallel(crop_tasks, cancel_event, on_done=_on_crop_plan)
-
-    _check_cancel(cancel_event)
-
-    # --- Phase 4: generate PDFs for each job ------------------------------------
-    all_outputs: list[Path] = []
-    total_jobs = len(job_data_list)
-    for job_idx, jd in enumerate(job_data_list, start=1):
-        _check_cancel(cancel_event)
-        if on_job_pdf_start:
-            on_job_pdf_start(job_idx, total_jobs, jd.base_name)
-        outputs = generate(
-            output_dir,
-            jd.base_name,
-            jd.ordered_slots,
-            jd.front_slot_to_id,
-            jd.back_slot_to_id,
-            id_to_bled,
-            progress_callback=_cb(Stage.PDF),
-            cancel_event=cancel_event,
-            fronts_only=fronts_only,
-            cut_line_color=cut_line_color,
-            cut_line_style=cut_line_style,
-            cut_line_width=cut_line_width,
-            cut_line_over_cards=cut_line_over_cards,
-            cut_line_over_fronts=cut_line_over_fronts,
-            cut_line_over_backs=cut_line_over_backs,
-        )
-        all_outputs.extend(outputs)
-
-    return all_outputs
+    spec = PrintJobSpec(
+        jobs=jobs,
+        output_dir=output_dir,
+        work_dir=work_dir,
+        cancel_event=cancel_event,
+        extra_fronts=extra_fronts or [],
+        extra_backs=extra_backs or [],
+        local_crop_map=local_crop_map or {},
+        on_job_pdf_start=on_job_pdf_start,
+        on_xml_download_progress=on_xml_download_progress,
+        on_xml_crop_progress=on_xml_crop_progress,
+        fronts_only=fronts_only,
+        on_speed_update=on_speed_update,
+        cut_line_color=cut_line_color,
+        cut_line_style=cut_line_style,
+        cut_line_width=cut_line_width,
+        cut_line_over_cards=cut_line_over_cards,
+        cut_line_over_fronts=cut_line_over_fronts,
+        cut_line_over_backs=cut_line_over_backs,
+    )
+    return PrintPipeline.execute(spec, progress_callback=progress_callback).pdf_paths
 
 
 def run_deck_url(
@@ -688,67 +786,18 @@ def run_deck_url(
     Normal cards use resources/backs/mtg/back.jpg as their back.
     No MPC bleed crop is applied (Scryfall images have no bleed).
     """
-    output_dir = Path(output_dir)
-    work_dir = Path(work_dir)
-    scryfall_dir = work_dir / "scryfall"
-
-    fetched = fetch_deck(url)
-    if fetched.name and fetched.name.strip():
-        base_name = sanitize_filename(fetched.name)
-
-    cards = [
-        c for c in fetched.cards if c.zone == "main" or (include_sideboard and c.zone == "side")
-    ]
-    if not cards:
-        raise ValueError("El mazo importado no contiene cartas.")
-
-    def _dl_progress(done: int, total: int) -> None:
-        if progress_callback:
-            progress_callback(Stage.DOWNLOAD, done, total)
-
-    if progress_callback:
-        progress_callback(Stage.DOWNLOAD, 0, len(cards))
-
-    try:
-        dl_results = download_deck_images(
-            cards,
-            scryfall_dir,
-            _dl_progress,
-            cancel_event,
-            lang=lang,
-            quality=quality,
-            fail_policy=fail_policy,
-            quality_check=quality_check,
-            blur_threshold=blur_threshold,
-        )
-    except ScryfallError as exc:
-        raise ValueError(f"Error al descargar imágenes de Scryfall: {exc}") from exc
-
-    _check_cancel(cancel_event)
-
-    mtg_back = resources_dir() / "backs" / "mtg" / "back.jpg"
-
-    extra_fronts: list[Path] = []
-    extra_backs: list[Path | None] = []
-    local_crop_map: dict[Path, bool] = {}
-
-    for card, front_path, back_path in dl_results:
-        local_crop_map[front_path] = False
-        if back_path:
-            local_crop_map[back_path] = False
-        for _ in range(card.quantity):
-            extra_fronts.append(front_path)
-            extra_backs.append(back_path)
-
-    return run_locals_only(
-        extra_fronts=extra_fronts,
-        local_cardback=mtg_back,
+    spec = PrintJobSpec(
+        deck_url=url,
         output_dir=output_dir,
-        base_name=base_name,
         work_dir=work_dir,
-        progress_callback=progress_callback,
+        base_name=base_name,
         cancel_event=cancel_event,
-        extra_backs=extra_backs,
-        local_crop_map=local_crop_map,
+        include_sideboard=include_sideboard,
         fronts_only=fronts_only,
+        deck_lang=lang,
+        deck_quality=quality,
+        deck_fail_policy=fail_policy,
+        deck_quality_check=quality_check,
+        deck_blur_threshold=blur_threshold,
     )
+    return PrintPipeline.execute(spec, progress_callback=progress_callback).pdf_paths

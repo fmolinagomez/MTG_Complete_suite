@@ -15,6 +15,9 @@ from src.deck_importer import DeckCard, FetchedDeck
 from src.downloader import DownloadPermissionError
 from src.parser import parse
 from src.pipeline import (
+    PrintJobResult,
+    PrintJobSpec,
+    PrintPipeline,
     _build_crop_tasks,
     _build_slot_maps,
     _local_synthetic_id,
@@ -759,3 +762,95 @@ class TestRunDeckUrl:
         dl_events = [(s, d, t) for s, d, t in events if s == "download"]
         assert dl_events, "No download events fired"
         assert dl_events[0][1] == 0
+
+
+# ─── PrintPipeline Unified Seam ─────────────────────────────────────────────
+
+
+class TestPrintPipelineUnifiedSeam:
+    def test_print_job_spec_defaults(self):
+        spec = PrintJobSpec()
+        assert spec.xml_paths == []
+        assert spec.jobs == []
+        assert spec.extra_fronts == []
+        assert spec.extra_backs == []
+        assert spec.local_cardback is None
+        assert spec.deck_url is None
+        assert spec.base_name == "deck"
+        assert spec.fronts_only is False
+
+    def test_print_job_result_interface(self, tmp_path):
+        p1 = tmp_path / "a.pdf"
+        p2 = tmp_path / "b.pdf"
+        res = PrintJobResult(pdf_paths=[p1, p2], manifest={"total_jobs": 2})
+
+        assert len(res) == 2
+        assert res[0] == p1
+        assert res[1] == p2
+        assert list(res) == [p1, p2]
+        assert res.manifest == {"total_jobs": 2}
+
+    def test_execute_single_xml(self, tmp_path):
+        xml = _one_card_xml(tmp_path)
+        spec = PrintJobSpec(
+            xml_paths=[xml],
+            base_name="spec_test",
+            output_dir=tmp_path / "out",
+            work_dir=tmp_path / "work",
+        )
+        with patch("src.pipeline.download_all", side_effect=_fake_download_all(tmp_path / "raw")):
+            result = PrintPipeline.execute(spec)
+
+        assert isinstance(result, PrintJobResult)
+        assert len(result.pdf_paths) == 1
+        assert result.pdf_paths[0].exists()
+        assert result.manifest["total_jobs"] == 1
+        assert result.manifest["total_cards"] == 1
+        assert result.manifest["job_names"] == ["spec_test"]
+
+    def test_execute_locals_only(self, tmp_path):
+        front = _img(tmp_path / "front.jpg")
+        cardback = _img(tmp_path / "back.jpg")
+        spec = PrintJobSpec(
+            extra_fronts=[front],
+            local_cardback=cardback,
+            base_name="locals_spec",
+            output_dir=tmp_path / "out",
+            work_dir=tmp_path / "work",
+        )
+        pipeline = PrintPipeline(crop_threads=2)
+        result = pipeline.run_job(spec)
+
+        assert isinstance(result, PrintJobResult)
+        assert len(result.pdf_paths) == 1
+        assert result.pdf_paths[0].exists()
+        assert result.manifest["total_jobs"] == 1
+        assert result.manifest["total_cards"] == 1
+
+    def test_execute_multi_job_plan(self, tmp_path):
+        xml1 = make_xml(
+            tmp_path / "a.xml",
+            fronts=[{"id": f"FA{i}", "name": f"A{i}", "slots": str(i)} for i in range(9)],
+            cardback_id="CBA",
+        )
+        xml2 = make_xml(
+            tmp_path / "b.xml",
+            fronts=[{"id": f"FB{i}", "name": f"B{i}", "slots": str(i)} for i in range(9)],
+            cardback_id="CBB",
+        )
+        reports = analyze([xml1, xml2])
+        p = make_plan(reports)
+
+        spec = PrintJobSpec(
+            jobs=p.jobs,
+            output_dir=tmp_path / "out",
+            work_dir=tmp_path / "work",
+        )
+        with patch("src.pipeline.download_all", side_effect=_fake_download_all(tmp_path / "raw")):
+            result = PrintPipeline.execute(spec)
+
+        assert len(result.pdf_paths) == 2
+        assert result.manifest["total_jobs"] == 2
+        assert result.manifest["total_cards"] == 18
+
+

@@ -167,6 +167,6 @@ MPCFillToPDF/
 │   └── views/                 # Pantallas (HubView, InventoryView, GeneratorView, ValidatorView, SettingsView)
 ├── cli/                       # Procesador desatendido en consola
 ├── docs/                      # Documentos de arquitectura, ADRs y planes
-└── tests/                     # Suite completa de pruebas automatizadas (740+ tests)
+└── tests/                     # Suite completa de pruebas automatizadas (772+ tests)
 ```
 
