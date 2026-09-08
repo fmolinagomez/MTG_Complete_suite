@@ -357,18 +357,20 @@ class InventoryService:
         deck_cards: list[DeckCardEntry],
         allocate_mode: str = "exclusive",
         current_deck_id: int | None = None,
+        include_proxies: bool = True,
     ) -> MissingProxyPlan:
-        """Evaluate physical card availability vs deck requirements (Option C Stock Allocation)."""
+        """Evaluate physical card and proxy availability vs deck requirements (Option C Stock Allocation)."""
         if not deck_cards:
             return MissingProxyPlan()
 
         with get_db(self.db_path) as conn:
+            where_sql = "WHERE quantity > 0" if include_proxies else "WHERE is_proxy = 0 AND quantity > 0"
             rows = conn.execute(
-                """
+                f"""
                 SELECT id, oracle_id, name, set_code, collector_number, quantity,
                        is_foil, is_proxy, condition, language, metadata_json
                 FROM inventory_cards
-                WHERE is_proxy = 0 AND quantity > 0
+                {where_sql}
                 """
             ).fetchall()
             inventory_cards = [
@@ -390,11 +392,15 @@ class InventoryService:
 
             other_deck_cards: list[DeckCardEntry] = []
             if allocate_mode == "exclusive":
-                deck_filter_sql = "WHERE is_proxy = 0"
+                deck_filter_clauses: list[str] = []
                 deck_params: list[object] = []
+                if not include_proxies:
+                    deck_filter_clauses.append("is_proxy = 0")
                 if current_deck_id is not None:
-                    deck_filter_sql += " AND deck_id != ?"
+                    deck_filter_clauses.append("deck_id != ?")
                     deck_params.append(current_deck_id)
+
+                deck_filter_sql = f"WHERE {' AND '.join(deck_filter_clauses)}" if deck_filter_clauses else ""
 
                 assigned_rows = conn.execute(
                     f"""
@@ -425,6 +431,7 @@ class InventoryService:
             other_deck_cards=other_deck_cards,
             allocate_mode=allocate_mode,
             current_deck_id=current_deck_id,
+            include_proxies=include_proxies,
         )
 
     def import_deck_cards_to_inventory(self, deck_id: int, as_proxy: bool = False) -> int:
@@ -564,6 +571,7 @@ class InventoryService:
         filter_usage: str = "all",
         filter_set: str = "",
         filter_rarity: str = "",
+        include_proxies: bool = True,
     ) -> list[tuple[InventoryCard, int, int]]:
         """Fetch inventory cards along with dynamic in-deck usage and available quantity."""
         all_cards = self.get_inventory_cards()
@@ -593,7 +601,7 @@ class InventoryService:
         ]
 
         usage_by_card_id, avail_by_card_id = self.allocation_engine.calculate_inventory_usage(
-            all_cards, all_deck_cards
+            all_cards, all_deck_cards, include_proxies=include_proxies
         )
 
         results: list[tuple[InventoryCard, int, int]] = []
@@ -640,18 +648,21 @@ class InventoryService:
         self,
         deck_cards: list[DeckCardEntry],
         current_deck_id: int | None = None,
+        allocate_mode: str = "exclusive",
+        include_proxies: bool = True,
     ) -> tuple[list[DeckCardMatchDetail], int, int, int]:
-        """Analyze physical card matches for deck cards respecting Option C stock allocation."""
+        """Analyze physical and proxy card matches for deck cards respecting stock allocation."""
         if not deck_cards:
             return [], 0, 0, 0
 
         with get_db(self.db_path) as conn:
+            where_sql = "WHERE quantity > 0" if include_proxies else "WHERE is_proxy = 0 AND quantity > 0"
             rows = conn.execute(
-                """
+                f"""
                 SELECT id, oracle_id, name, set_code, collector_number, quantity,
                        is_foil, is_proxy, condition, language, metadata_json
                 FROM inventory_cards
-                WHERE is_proxy = 0 AND quantity > 0
+                {where_sql}
                 """
             ).fetchall()
             inventory_cards = [
@@ -671,12 +682,16 @@ class InventoryService:
                 for row in rows
             ]
 
-            # Deduct physical cards allocated to other registered decks
-            deck_filter_sql = "WHERE is_proxy = 0"
+            # Deduct cards allocated to other registered decks
+            deck_filter_clauses: list[str] = []
             deck_params: list[object] = []
+            if not include_proxies:
+                deck_filter_clauses.append("is_proxy = 0")
             if current_deck_id is not None:
-                deck_filter_sql += " AND deck_id != ?"
+                deck_filter_clauses.append("deck_id != ?")
                 deck_params.append(current_deck_id)
+
+            deck_filter_sql = f"WHERE {' AND '.join(deck_filter_clauses)}" if deck_filter_clauses else ""
 
             assigned_rows = conn.execute(
                 f"""
@@ -706,7 +721,8 @@ class InventoryService:
             deck_cards=deck_cards,
             inventory_cards=inventory_cards,
             other_deck_cards=other_deck_cards,
-            allocate_mode="exclusive",
+            allocate_mode=allocate_mode,
             current_deck_id=current_deck_id,
+            include_proxies=include_proxies,
         )
 

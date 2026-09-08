@@ -45,15 +45,17 @@ class TestStockAllocationEngine:
             DeckCardEntry(deck_id=1, oracle_id="orc-4", name="Mox Pearl", set_code="lea", collector_number="233", quantity_required=1),
         ]
 
-        plan = engine.calculate_missing_proxies(deck_cards, inventory)
-
+        # Default (include_proxies=True): Proxy Lotus in inventory counts as owned
+        plan = engine.calculate_missing_proxies(deck_cards, inventory, include_proxies=True)
         assert plan.total_required == 6
-        # Sol Ring: 2 owned, 1 missing
-        # Mana Vault: 1 owned, 0 missing
-        # Proxy Lotus: 0 owned (inventory is proxy, only physical counts), 1 missing
-        # Mox Pearl: 0 owned, 1 missing
-        assert plan.total_owned == 3
-        assert plan.total_missing == 3
+        assert plan.total_owned == 4
+        assert plan.total_missing == 2
+
+        # Physical only (include_proxies=False): Proxy Lotus in inventory is excluded
+        plan_phys = engine.calculate_missing_proxies(deck_cards, inventory, include_proxies=False)
+        assert plan_phys.total_required == 6
+        assert plan_phys.total_owned == 3
+        assert plan_phys.total_missing == 3
 
         owned_sol = next(c for c in plan.owned_cards if c.name == "Sol Ring")
         assert owned_sol.quantity_required == 2

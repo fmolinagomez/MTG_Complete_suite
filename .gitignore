@@ -50,6 +50,8 @@ gui/_build_flags.py
 
 # Runtime output folder created next to the .exe (or project root in dev)
 MPCFillToPDF/
+*.db
+*.sqlite3
 
 # OS
 .DS_Store

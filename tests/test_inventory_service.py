@@ -513,3 +513,67 @@ class TestInventoryService:
         assert alt_d1 == 0
         assert missing_d1 == 0
 
+    def test_moxfield_deck_matches_inventory_proxies(self, service: InventoryService):
+        # User inventory has 1 Sol Ring and 1 Arcane Signet marked as is_proxy=True
+        service.add_or_update_card(
+            InventoryCard(oracle_id="", name="Sol Ring", set_code="c21", collector_number="263", quantity=1, is_proxy=True)
+        )
+        service.add_or_update_card(
+            InventoryCard(oracle_id="", name="Arcane Signet", set_code="eld", collector_number="331", quantity=1, is_proxy=True)
+        )
+
+        # Deck loaded from Moxfield requires Sol Ring (exact) and Arcane Signet (alt edition) and Mana Crypt (missing)
+        deck_cards = [
+            DeckCardEntry(deck_id=0, oracle_id="", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=1, is_proxy=False),
+            DeckCardEntry(deck_id=0, oracle_id="", name="Arcane Signet", set_code="cmm", collector_number="657", quantity_required=1, is_proxy=False),
+            DeckCardEntry(deck_id=0, oracle_id="", name="Mana Crypt", set_code="2xm", collector_number="270", quantity_required=1, is_proxy=False),
+        ]
+
+        # With include_proxies=True (default)
+        details, exact, alt, missing = service.analyze_deck_card_matches(deck_cards, include_proxies=True)
+        assert exact == 1  # Sol Ring exact
+        assert alt == 1    # Arcane Signet alt
+        assert missing == 1  # Mana Crypt missing
+        assert details[0].status == "exact"
+        assert details[1].status == "alternative"
+        assert details[2].status == "missing"
+
+        plan = service.calculate_missing_proxies(deck_cards, include_proxies=True)
+        assert plan.total_owned == 2
+        assert plan.total_missing == 1
+        assert plan.missing_cards[0].name == "Mana Crypt"
+
+        # With include_proxies=False (physical only)
+        details_phys, exact_phys, alt_phys, missing_phys = service.analyze_deck_card_matches(deck_cards, include_proxies=False)
+        assert exact_phys == 0
+        assert alt_phys == 0
+        assert missing_phys == 3
+
+    def test_double_faced_and_apostrophe_resilient_matching(self, service: InventoryService):
+        # Inventory has cards with front-face only, curly apostrophe, and numeric collector numbers
+        service.add_or_update_card(
+            InventoryCard(oracle_id="", name="Delver of Secrets", set_code="isd", collector_number="51", quantity=1, is_proxy=False)
+        )
+        service.add_or_update_card(
+            InventoryCard(oracle_id="", name="Urza's Tower", set_code="2xm", collector_number="331", quantity=1, is_proxy=False)
+        )
+        service.add_or_update_card(
+            InventoryCard(oracle_id="", name="Lightning Bolt", set_code="m11", collector_number="149", quantity=1, is_proxy=False)
+        )
+
+        deck_cards = [
+            # Moxfield style: front // back name
+            DeckCardEntry(deck_id=0, oracle_id="", name="Delver of Secrets // Insectile Aberration", set_code="isd", collector_number="51", quantity_required=1),
+            # Moxfield style: smart apostrophe
+            DeckCardEntry(deck_id=0, oracle_id="", name="Urza’s Tower", set_code="2xm", collector_number="331", quantity_required=1),
+            # Leading zero in collector number
+            DeckCardEntry(deck_id=0, oracle_id="", name="Lightning Bolt", set_code="m11", collector_number="0149", quantity_required=1),
+        ]
+
+        details, exact, alt, missing = service.analyze_deck_card_matches(deck_cards, include_proxies=True)
+        assert exact == 3
+        assert alt == 0
+        assert missing == 0
+        assert all(d.status == "exact" for d in details)
+
+

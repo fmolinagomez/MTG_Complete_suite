@@ -512,6 +512,8 @@ class InventoryView(ttk.Frame):
         self._filter_set_var = tk.StringVar(value="Todas las ediciones")
         self._filter_rarity_var = tk.StringVar(value="Todas")
         self._deck_url_var = tk.StringVar()
+        self._deck_include_proxies_var = tk.BooleanVar(value=True)
+        self._deck_allocate_mode_var = tk.StringVar(value="exclusive")
 
         # Sorting state
         self._inv_sort_col: str | None = None
@@ -844,6 +846,7 @@ class InventoryView(ttk.Frame):
             filter_usage=filter_usage,
             filter_set=filter_set,
             filter_rarity=filter_rarity,
+            include_proxies=self._deck_include_proxies_var.get(),
         )
 
         if filter_mode == "Solo Foils":
@@ -1001,15 +1004,35 @@ class InventoryView(ttk.Frame):
         sel_frame.pack(fill=tk.X, padx=6, pady=2)
 
         ttk.Label(sel_frame, text="Mazo Seleccionado:", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=(2, 6))
-        self.cb_decks = ttk.Combobox(sel_frame, state="readonly", width=35)
-        self.cb_decks.pack(side=tk.LEFT, padx=(0, 8))
+        self.cb_decks = ttk.Combobox(sel_frame, state="readonly", width=28)
+        self.cb_decks.pack(side=tk.LEFT, padx=(0, 6))
         self.cb_decks.bind("<<ComboboxSelected>>", self._on_deck_combobox_changed)
 
         btn_delete_deck = ttk.Button(sel_frame, text="🗑️ Eliminar Mazo", command=self._on_delete_deck_click)
         btn_delete_deck.pack(side=tk.LEFT, padx=4)
 
+        # Stock evaluation options
+        self._chk_include_proxies = ttk.Checkbutton(
+            sel_frame,
+            text="Contar proxies",
+            variable=self._deck_include_proxies_var,
+            command=self._on_deck_options_changed,
+        )
+        self._chk_include_proxies.pack(side=tk.LEFT, padx=(8, 4))
+
+        ttk.Label(sel_frame, text="Asignación:").pack(side=tk.LEFT, padx=(6, 2))
+        self.cb_allocate_mode = ttk.Combobox(
+            sel_frame,
+            values=["Exclusiva", "Compartida"],
+            state="readonly",
+            width=11,
+        )
+        self.cb_allocate_mode.set("Exclusiva")
+        self.cb_allocate_mode.pack(side=tk.LEFT, padx=(0, 6))
+        self.cb_allocate_mode.bind("<<ComboboxSelected>>", self._on_deck_options_changed)
+
         self.lbl_deck_info = ttk.Label(sel_frame, text="", font=("Segoe UI", 9), foreground="#555555")
-        self.lbl_deck_info.pack(side=tk.LEFT, padx=(10, 0))
+        self.lbl_deck_info.pack(side=tk.LEFT, padx=(6, 0))
 
         # Deck breakdown table
         table_frame = ttk.Frame(parent)
@@ -1128,9 +1151,18 @@ class InventoryView(ttk.Frame):
                 is_proxy=False,
             )
             for c in fetched.cards
-            if c.zone == "main"
+            if c.zone not in ("side", "sideboard", "maybe", "maybeboard", "token")
         ]
         return self.inventory_service.register_deck(deck_rec, deck_cards)
+
+    def _on_deck_options_changed(self, _event=None) -> None:
+        mode_val = self.cb_allocate_mode.get().strip().lower()
+        self._deck_allocate_mode_var.set("shared" if "compartida" in mode_val else "exclusive")
+        self._filter_collection_table()
+        if self._current_deck_id is not None:
+            deck_data = self.inventory_service.get_deck_by_id(self._current_deck_id)
+            if deck_data:
+                self._select_deck(deck_data[0])
 
     def _on_deck_combobox_changed(self, _event=None) -> None:
         idx = self.cb_decks.current()
@@ -1168,6 +1200,8 @@ class InventoryView(ttk.Frame):
             self.inventory_service.analyze_deck_card_matches(
                 deck_cards,
                 current_deck_id=deck.id,
+                allocate_mode=self._deck_allocate_mode_var.get(),
+                include_proxies=self._deck_include_proxies_var.get(),
             )
         )
 
@@ -1276,14 +1310,15 @@ class InventoryView(ttk.Frame):
 
         plan = self.inventory_service.calculate_missing_proxies(
             deck_cards,
-            allocate_mode="exclusive",
+            allocate_mode=self._deck_allocate_mode_var.get(),
             current_deck_id=self._current_deck_id,
+            include_proxies=self._deck_include_proxies_var.get(),
         )
 
         if not plan.missing_cards:
             messagebox.showinfo(
                 "Colección Completa",
-                "¡Tienes todas las cartas necesarias en tu colección física! No hay proxies faltantes que generar.",
+                "¡Tienes todas las cartas necesarias en tu colección! No hay proxies faltantes que generar.",
                 parent=self,
             )
             return

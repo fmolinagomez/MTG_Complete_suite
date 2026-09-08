@@ -698,3 +698,45 @@ class TestInventoryView:
         assert len(inv_service.get_all_decks()) == 0
 
         view.destroy()
+
+    def test_deck_view_include_proxies_toggle(self, clean_root, inv_service, task_manager):
+        # Add proxy card to inventory
+        inv_service.add_or_update_card(
+            InventoryCard(oracle_id="", name="Sol Ring", set_code="c21", collector_number="263", quantity=1, is_proxy=True)
+        )
+        deck_id = inv_service.register_deck(
+            DeckRecord(name="Proxy Test Deck"),
+            [
+                DeckCardEntry(deck_id=0, oracle_id="", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=1, is_proxy=False),
+            ],
+        )
+
+        view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
+        view.pack()
+        view._select_deck_by_id(deck_id)
+
+        rows = view.deck_tree.get_children()
+        sol_row = view.deck_tree.item(rows[0])["values"]
+        # With default include_proxies=True:
+        assert sol_row[4] == 1  # exact stock = 1
+        assert "Exacta" in sol_row[6]
+
+        # Toggle include_proxies to False
+        view._deck_include_proxies_var.set(False)
+        view._on_deck_options_changed()
+
+        rows_after = view.deck_tree.get_children()
+        sol_row_after = view.deck_tree.item(rows_after[0])["values"]
+        assert sol_row_after[4] == 0  # exact stock = 0
+        assert "Faltante" in sol_row_after[6]
+
+        # Toggle back to True
+        view._deck_include_proxies_var.set(True)
+        view._on_deck_options_changed()
+        rows_back = view.deck_tree.get_children()
+        sol_row_back = view.deck_tree.item(rows_back[0])["values"]
+        assert sol_row_back[4] == 1
+        assert "Exacta" in sol_row_back[6]
+
+        view.destroy()
+
