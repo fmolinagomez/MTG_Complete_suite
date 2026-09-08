@@ -576,4 +576,135 @@ class TestInventoryService:
         assert missing == 0
         assert all(d.status == "exact" for d in details)
 
+    def test_batch_delete_cards(self, service: InventoryService):
+        id1 = service.add_or_update_card(
+            InventoryCard(oracle_id="1", name="Card 1", set_code="set", collector_number="1", quantity=1)
+        )
+        id2 = service.add_or_update_card(
+            InventoryCard(oracle_id="2", name="Card 2", set_code="set", collector_number="2", quantity=1)
+        )
+        id3 = service.add_or_update_card(
+            InventoryCard(oracle_id="3", name="Card 3", set_code="set", collector_number="3", quantity=1)
+        )
+
+        assert service.batch_delete_cards([]) == 0
+
+        # Delete id1 and id2
+        deleted = service.batch_delete_cards([id1, id2])
+        assert deleted == 2
+
+        remaining = service.get_inventory_cards()
+        assert len(remaining) == 1
+        assert remaining[0].id == id3
+
+    def test_check_cards_in_decks(self, service: InventoryService):
+        id1 = service.add_or_update_card(
+            InventoryCard(oracle_id="orc-1", name="Sol Ring", set_code="c21", collector_number="263", quantity=2)
+        )
+        id2 = service.add_or_update_card(
+            InventoryCard(oracle_id="orc-2", name="Command Tower", set_code="cmr", collector_number="350", quantity=1)
+        )
+        id3 = service.add_or_update_card(
+            InventoryCard(oracle_id="orc-3", name="Forest", set_code="neo", collector_number="300", quantity=10)
+        )
+
+        # Register deck using Sol Ring and Command Tower
+        deck = DeckRecord(name="Ur-Dragon Commander", format="Commander")
+        deck_cards = [
+            DeckCardEntry(deck_id=0, oracle_id="orc-1", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=1),
+            DeckCardEntry(deck_id=0, oracle_id="orc-2", name="Command Tower", set_code="cmr", collector_number="350", quantity_required=1),
+        ]
+        service.register_deck(deck, deck_cards)
+
+        # Register second deck using Sol Ring only
+        deck2 = DeckRecord(name="Atraxa Superfriends", format="Commander")
+        deck_cards2 = [
+            DeckCardEntry(deck_id=0, oracle_id="orc-1", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=1),
+        ]
+        service.register_deck(deck2, deck_cards2)
+
+        deck_map = service.check_cards_in_decks([id1, id2, id3])
+        assert sorted(deck_map[id1]) == ["Atraxa Superfriends", "Ur-Dragon Commander"]
+        assert deck_map[id2] == ["Ur-Dragon Commander"]
+        assert deck_map[id3] == []
+
+    def test_batch_update_cards_simple(self, service: InventoryService):
+        id1 = service.add_or_update_card(
+            InventoryCard(oracle_id="1", name="Card 1", set_code="abc", collector_number="1", quantity=2, condition="NM", language="en")
+        )
+        id2 = service.add_or_update_card(
+            InventoryCard(oracle_id="2", name="Card 2", set_code="abc", collector_number="2", quantity=3, condition="NM", language="en")
+        )
+
+        count = service.batch_update_cards(
+            [id1, id2],
+            condition="LP",
+            language="es",
+            quantity_delta=1,
+        )
+        assert count == 2
+
+        c1 = service.get_card_by_id(id1)
+        assert c1 is not None
+        assert c1.condition == "LP"
+        assert c1.language == "es"
+        assert c1.quantity == 3
+
+        c2 = service.get_card_by_id(id2)
+        assert c2 is not None
+        assert c2.condition == "LP"
+        assert c2.language == "es"
+        assert c2.quantity == 4
+
+    def test_batch_update_cards_duplicate_merging(self, service: InventoryService):
+        # Card 1: Physical Sol Ring (quantity 2)
+        id_real = service.add_or_update_card(
+            InventoryCard(oracle_id="sol", name="Sol Ring", set_code="c21", collector_number="263", quantity=2, is_proxy=False)
+        )
+        # Card 2: Proxy Sol Ring (quantity 3)
+        id_proxy = service.add_or_update_card(
+            InventoryCard(oracle_id="sol", name="Sol Ring", set_code="c21", collector_number="263", quantity=3, is_proxy=True)
+        )
+
+        # Batch update: change physical card to proxy
+        count = service.batch_update_cards([id_real], is_proxy=True)
+        assert count == 1
+
+        # The real card row should have been merged into proxy row and deleted
+        assert service.get_card_by_id(id_real) is None
+        merged = service.get_card_by_id(id_proxy)
+        assert merged is not None
+        assert merged.is_proxy is True
+        assert merged.quantity == 5  # 3 + 2
+
+    def test_batch_assign_to_deck(self, service: InventoryService):
+        id1 = service.add_or_update_card(
+            InventoryCard(oracle_id="1", name="Card 1", set_code="set", collector_number="1", quantity=3)
+        )
+        id2 = service.add_or_update_card(
+            InventoryCard(oracle_id="2", name="Card 2", set_code="set", collector_number="2", quantity=2)
+        )
+
+        deck_id = service.register_deck(DeckRecord(name="Test Deck"), cards=[])
+
+        # Assign 1 copy each
+        assigned = service.batch_assign_to_deck(deck_id, [id1, id2], copies_mode="one")
+        assert assigned == 2
+
+        deck_info = service.get_deck_by_id(deck_id)
+        assert deck_info is not None
+        deck_rec, cards = deck_info
+        assert len(cards) == 2
+        assert all(c.quantity_required == 1 for c in cards)
+
+        # Assign again, should increment quantity_required
+        assigned2 = service.batch_assign_to_deck(deck_id, [id1], copies_mode="one")
+        assert assigned2 == 1
+
+        deck_info2 = service.get_deck_by_id(deck_id)
+        assert deck_info2 is not None
+        c1 = next(c for c in deck_info2[1] if c.set_code == "set" and c.collector_number == "1")
+        assert c1.quantity_required == 2
+
+
 

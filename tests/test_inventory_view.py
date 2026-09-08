@@ -10,6 +10,8 @@ import pytest
 
 from gui.views.inventory_view import (
     AddCardDialog,
+    BatchAssignDeckDialog,
+    BatchEditCardsDialog,
     CardDecksUsageDialog,
     DeckImportOptionDialog,
     InventoryView,
@@ -176,6 +178,71 @@ class TestInventoryDialogs:
         assert dlg.usage_tree is None
 
         dlg.destroy()
+
+    def test_batch_edit_cards_dialog(self, clean_root):
+        dlg = BatchEditCardsDialog(clean_root, count=3)
+        assert dlg.count == 3
+
+        # Test cancel
+        dlg._on_cancel()
+        assert dlg.result is None
+
+        # Reopen and test no changes warning
+        dlg2 = BatchEditCardsDialog(clean_root, count=3)
+        with patch("tkinter.messagebox.showinfo") as mock_info:
+            dlg2._on_accept()
+            mock_info.assert_called_once()
+            assert dlg2.result is None
+
+        # Set valid changes
+        dlg2._cond_var.set("LP")
+        dlg2._lang_var.set("es")
+        dlg2._foil_var.set("Solo Foil")
+        dlg2._proxy_var.set("Solo Proxies")
+        dlg2._qty_mode_var.set("Sumar copias (+)")
+        dlg2._qty_val_var.set(2)
+        dlg2._on_accept()
+
+        assert dlg2.result is not None
+        assert dlg2.result["condition"] == "LP"
+        assert dlg2.result["language"] == "es"
+        assert dlg2.result["is_foil"] is True
+        assert dlg2.result["is_proxy"] is True
+        assert dlg2.result["quantity_delta"] == 2
+        assert dlg2.result["set_quantity"] is None
+
+    def test_batch_assign_deck_dialog(self, clean_root):
+        cards = [
+            InventoryCard(oracle_id="1", name="Sol Ring", set_code="c21", collector_number="263", quantity=2),
+            InventoryCard(oracle_id="2", name="Command Tower", set_code="cmr", collector_number="350", quantity=1),
+        ]
+        decks = [DeckRecord(id=10, name="EDH Deck", format="Commander")]
+
+        # Case 1: Existing deck
+        dlg = BatchAssignDeckDialog(clean_root, cards=cards, decks=decks)
+        dlg._deck_choice_var.set("EDH Deck (Commander)")
+        dlg._copies_mode_var.set("one")
+        dlg._on_accept()
+
+        assert dlg.result is not None
+        assert dlg.result["deck_id"] == 10
+        assert dlg.result["copies_mode"] == "one"
+
+        # Case 2: New deck creation
+        dlg2 = BatchAssignDeckDialog(clean_root, cards=cards, decks=decks)
+        dlg2._deck_choice_var.set("➕ Crear nuevo mazo...")
+        dlg2._on_deck_selection_changed()
+        dlg2._new_name_var.set("Modern Elves")
+        dlg2._new_format_var.set("Modern")
+        dlg2._copies_mode_var.set("available")
+        dlg2._on_accept()
+
+        assert dlg2.result is not None
+        assert dlg2.result["deck_id"] is None
+        assert dlg2.result["new_name"] == "Modern Elves"
+        assert dlg2.result["new_format"] == "Modern"
+        assert dlg2.result["copies_mode"] == "available"
+
 
 
 # ---------------------------------------------------------------------------
@@ -739,4 +806,203 @@ class TestInventoryView:
         assert "Exacta" in sol_row_back[6]
 
         view.destroy()
+
+    def test_inventory_view_batch_selection_and_shortcuts(self, clean_root, inv_service, task_manager):
+        inv_service.add_or_update_card(InventoryCard(oracle_id="1", name="Card A", set_code="set", collector_number="1", quantity=2))
+        inv_service.add_or_update_card(InventoryCard(oracle_id="2", name="Card B", set_code="set", collector_number="2", quantity=3))
+        inv_service.add_or_update_card(InventoryCard(oracle_id="3", name="Card C", set_code="set", collector_number="3", quantity=1))
+
+        view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
+        view.pack()
+
+        # Treeview selectmode must be extended
+        assert str(view.inv_tree.cget("selectmode")) == "extended"
+
+        rows = view.inv_tree.get_children()
+        assert len(rows) == 3
+
+        # Initially no selection, batch bar should be hidden
+        assert len(view.inv_tree.selection()) == 0
+        assert view.batch_bar_frame.winfo_manager() != "pack"
+
+        # Select 1 item
+        view.inv_tree.selection_set(rows[0])
+        view._update_batch_bar()
+        assert view.batch_bar_frame.winfo_manager() == "pack"
+        assert "1 carta seleccionada" in view.lbl_batch_count.cget("text")
+
+        # Select 2 items
+        view.inv_tree.selection_set(rows[0], rows[1])
+        view._update_batch_bar()
+        assert view.batch_bar_frame.winfo_manager() == "pack"
+        assert "2 cartas seleccionadas (5 copias en total)" in view.lbl_batch_count.cget("text")
+
+        # Shortcut: Select All
+        res = view._on_select_all_cards()
+        assert res == "break"
+        assert len(view.inv_tree.selection()) == 3
+        assert "3 cartas seleccionadas (6 copias en total)" in view.lbl_batch_count.cget("text")
+
+        # Shortcut: Deselect All
+        res = view._on_deselect_all_cards()
+        assert res == "break"
+        assert len(view.inv_tree.selection()) == 0
+        assert view.batch_bar_frame.winfo_manager() != "pack"
+
+        view.destroy()
+
+    def test_inventory_view_batch_toggle_proxy(self, clean_root, inv_service, task_manager):
+        inv_service.add_or_update_card(InventoryCard(oracle_id="1", name="Card 1", set_code="set", collector_number="1", quantity=1, is_proxy=False))
+        inv_service.add_or_update_card(InventoryCard(oracle_id="2", name="Card 2", set_code="set", collector_number="2", quantity=1, is_proxy=False))
+
+        view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
+        view.pack()
+
+        rows = view.inv_tree.get_children()
+        view.inv_tree.selection_set(rows[0], rows[1])
+        view._update_batch_bar()
+
+        # Toggle all physical to proxy
+        view._on_batch_toggle_proxy_click()
+        cards = inv_service.get_inventory_cards()
+        assert all(c.is_proxy is True for c in cards)
+
+        # Toggle all proxy to physical
+        rows = view.inv_tree.get_children()
+        view.inv_tree.selection_set(rows[0], rows[1])
+        view._on_batch_toggle_proxy_click()
+        cards = inv_service.get_inventory_cards()
+        assert all(c.is_proxy is False for c in cards)
+
+        view.destroy()
+
+    def test_inventory_view_batch_toggle_foil(self, clean_root, inv_service, task_manager):
+        inv_service.add_or_update_card(InventoryCard(oracle_id="1", name="Card 1", set_code="set", collector_number="1", quantity=1, is_foil=False))
+        inv_service.add_or_update_card(InventoryCard(oracle_id="2", name="Card 2", set_code="set", collector_number="2", quantity=1, is_foil=False))
+
+        view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
+        view.pack()
+
+        rows = view.inv_tree.get_children()
+        view.inv_tree.selection_set(rows[0], rows[1])
+        view._update_batch_bar()
+
+        # Toggle all non-foil to foil
+        view._on_batch_toggle_foil_click()
+        cards = inv_service.get_inventory_cards()
+        assert all(c.is_foil is True for c in cards)
+
+        # Toggle all foil to non-foil
+        rows = view.inv_tree.get_children()
+        view.inv_tree.selection_set(rows[0], rows[1])
+        view._on_batch_toggle_foil_click()
+        cards = inv_service.get_inventory_cards()
+        assert all(c.is_foil is False for c in cards)
+
+        view.destroy()
+
+    def test_inventory_view_batch_edit_click(self, clean_root, inv_service, task_manager):
+        id1 = inv_service.add_or_update_card(InventoryCard(oracle_id="1", name="Card 1", set_code="set", collector_number="1", quantity=1, condition="NM", language="en"))
+        id2 = inv_service.add_or_update_card(InventoryCard(oracle_id="2", name="Card 2", set_code="set", collector_number="2", quantity=1, condition="NM", language="en"))
+
+        view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
+        view.pack()
+
+        rows = view.inv_tree.get_children()
+        view.inv_tree.selection_set(rows[0], rows[1])
+
+        mock_result = {
+            "is_foil": None,
+            "is_proxy": None,
+            "condition": "HP",
+            "language": "ja",
+            "set_quantity": 4,
+            "quantity_delta": None,
+        }
+
+        with patch.object(view, "wait_window"):
+            with patch("gui.views.inventory_view.BatchEditCardsDialog") as MockDialog:
+                mock_dlg_instance = MagicMock()
+                mock_dlg_instance.result = mock_result
+                MockDialog.return_value = mock_dlg_instance
+
+                view._on_batch_edit_click()
+
+        c1 = inv_service.get_card_by_id(id1)
+        c2 = inv_service.get_card_by_id(id2)
+        assert c1.condition == "HP"
+        assert c1.language == "ja"
+        assert c1.quantity == 4
+        assert c2.condition == "HP"
+        assert c2.language == "ja"
+        assert c2.quantity == 4
+
+        view.destroy()
+
+    def test_inventory_view_batch_assign_deck_click(self, clean_root, inv_service, task_manager):
+        inv_service.add_or_update_card(InventoryCard(oracle_id="1", name="Card 1", set_code="set", collector_number="1", quantity=2))
+        inv_service.add_or_update_card(InventoryCard(oracle_id="2", name="Card 2", set_code="set", collector_number="2", quantity=1))
+
+        deck_id = inv_service.register_deck(DeckRecord(name="Commander Deck"), cards=[])
+
+        view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
+        view.pack()
+
+        rows = view.inv_tree.get_children()
+        view.inv_tree.selection_set(rows[0], rows[1])
+
+        mock_result = {
+            "deck_id": deck_id,
+            "new_name": None,
+            "new_format": None,
+            "copies_mode": "one",
+        }
+
+        with patch.object(view, "wait_window"):
+            with patch("gui.views.inventory_view.BatchAssignDeckDialog") as MockDialog, \
+                 patch("tkinter.messagebox.showinfo") as mock_info:
+                mock_dlg_instance = MagicMock()
+                mock_dlg_instance.result = mock_result
+                MockDialog.return_value = mock_dlg_instance
+
+                view._on_batch_assign_deck_click()
+                mock_info.assert_called_once()
+
+        deck_info = inv_service.get_deck_by_id(deck_id)
+        assert deck_info is not None
+        _, cards = deck_info
+        assert len(cards) == 2
+        assert all(c.quantity_required == 1 for c in cards)
+
+        view.destroy()
+
+    def test_inventory_view_batch_delete_with_warning(self, clean_root, inv_service, task_manager):
+        inv_service.add_or_update_card(InventoryCard(oracle_id="1", name="Card In Deck", set_code="set", collector_number="1", quantity=1))
+        inv_service.add_or_update_card(InventoryCard(oracle_id="2", name="Card Free", set_code="set", collector_number="2", quantity=1))
+
+        # Register deck using Card 1
+        inv_service.register_deck(
+            DeckRecord(name="Ur-Dragon"),
+            [DeckCardEntry(deck_id=0, oracle_id="1", name="Card In Deck", set_code="set", collector_number="1", quantity_required=1)],
+        )
+
+        view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
+        view.pack()
+
+        rows = view.inv_tree.get_children()
+        view.inv_tree.selection_set(rows[0], rows[1])
+
+        with patch("tkinter.messagebox.askyesno", return_value=True) as mock_ask:
+            view._on_batch_delete_click()
+            mock_ask.assert_called_once()
+            # Verify message contains warning and deck name
+            prompt_text = mock_ask.call_args[0][1]
+            assert "ADVERTENCIA" in prompt_text
+            assert "Ur-Dragon" in prompt_text
+
+        # Cards should be deleted
+        assert len(inv_service.get_inventory_cards()) == 0
+
+        view.destroy()
+
 

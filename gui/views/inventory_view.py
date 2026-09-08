@@ -477,6 +477,380 @@ class DeckImportOptionDialog(tk.Toplevel):
         self.destroy()
 
 
+class BatchEditCardsDialog(tk.Toplevel):
+    """Modal dialog to modify attributes of multiple selected inventory cards."""
+
+    def __init__(self, parent: tk.Misc, count: int) -> None:
+        super().__init__(parent)
+        self.title(f"Edición en Lote ({count} cartas)")
+        self.resizable(False, False)
+        self.transient(parent.winfo_toplevel() if hasattr(parent, "winfo_toplevel") else parent)
+        self.grab_set()
+
+        self.count = count
+        self.result: dict | None = None
+
+        self._cond_var = tk.StringVar(value="[Sin cambios]")
+        self._lang_var = tk.StringVar(value="[Sin cambios]")
+        self._foil_var = tk.StringVar(value="[Sin cambios]")
+        self._proxy_var = tk.StringVar(value="[Sin cambios]")
+        self._qty_mode_var = tk.StringVar(value="[Sin cambios]")
+        self._qty_val_var = tk.IntVar(value=1)
+
+        self._build_ui()
+        self._center_window(parent)
+
+    def _build_ui(self) -> None:
+        container = ttk.Frame(self, padding=16)
+        container.pack(fill=tk.BOTH, expand=True)
+
+        header = ttk.Label(
+            container,
+            text=f"Modificar {self.count} cartas seleccionadas:",
+            font=("Segoe UI", 10, "bold"),
+        )
+        header.pack(anchor=tk.W, pady=(0, 10))
+
+        grid = ttk.Frame(container)
+        grid.pack(fill=tk.BOTH, expand=True)
+
+        # Condición
+        ttk.Label(grid, text="Condición:").grid(row=0, column=0, sticky=tk.W, pady=4)
+        cb_cond = ttk.Combobox(
+            grid,
+            textvariable=self._cond_var,
+            values=["[Sin cambios]", "NM", "LP", "MP", "HP", "DMG"],
+            state="readonly",
+            width=16,
+        )
+        cb_cond.grid(row=0, column=1, sticky=tk.W, padx=6, pady=4)
+
+        # Idioma
+        ttk.Label(grid, text="Idioma:").grid(row=1, column=0, sticky=tk.W, pady=4)
+        cb_lang = ttk.Combobox(
+            grid,
+            textvariable=self._lang_var,
+            values=["[Sin cambios]", "en", "es", "ja", "fr", "de", "it", "pt"],
+            state="readonly",
+            width=16,
+        )
+        cb_lang.grid(row=1, column=1, sticky=tk.W, padx=6, pady=4)
+
+        # Foil
+        ttk.Label(grid, text="Acabado Foil:").grid(row=2, column=0, sticky=tk.W, pady=4)
+        cb_foil = ttk.Combobox(
+            grid,
+            textvariable=self._foil_var,
+            values=["[Sin cambios]", "Solo Foil", "Solo Normal (No Foil)"],
+            state="readonly",
+            width=16,
+        )
+        cb_foil.grid(row=2, column=1, sticky=tk.W, padx=6, pady=4)
+
+        # Proxy
+        ttk.Label(grid, text="Estado Proxy:").grid(row=3, column=0, sticky=tk.W, pady=4)
+        cb_proxy = ttk.Combobox(
+            grid,
+            textvariable=self._proxy_var,
+            values=["[Sin cambios]", "Solo Proxies", "Solo Físicas (Reales)"],
+            state="readonly",
+            width=16,
+        )
+        cb_proxy.grid(row=3, column=1, sticky=tk.W, padx=6, pady=4)
+
+        # Cantidad
+        ttk.Label(grid, text="Ajuste de Cantidad:").grid(row=4, column=0, sticky=tk.W, pady=4)
+        cb_qty_mode = ttk.Combobox(
+            grid,
+            textvariable=self._qty_mode_var,
+            values=["[Sin cambios]", "Establecer cantidad exacta", "Sumar copias (+)", "Restar copias (-)"],
+            state="readonly",
+            width=20,
+        )
+        cb_qty_mode.grid(row=4, column=1, sticky=tk.W, padx=6, pady=4)
+
+        self.sp_qty = ttk.Spinbox(grid, from_=1, to=999, textvariable=self._qty_val_var, width=6)
+        self.sp_qty.grid(row=4, column=2, sticky=tk.W, padx=4, pady=4)
+
+        ttk.Separator(container, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=12)
+
+        btn_box = ttk.Frame(container)
+        btn_box.pack(fill=tk.X)
+        ttk.Button(btn_box, text="Cancelar", command=self._on_cancel).pack(side=tk.RIGHT, padx=(4, 0))
+        ttk.Button(btn_box, text="Aplicar Cambios", command=self._on_accept).pack(side=tk.RIGHT)
+
+        self.bind("<Return>", lambda _e: self._on_accept())
+        self.bind("<Escape>", lambda _e: self._on_cancel())
+
+    def _center_window(self, parent: tk.Misc) -> None:
+        self.update_idletasks()
+        w, h = self.winfo_reqwidth(), self.winfo_reqheight()
+        try:
+            pw, ph = parent.winfo_width(), parent.winfo_height()
+            px, py = parent.winfo_rootx(), parent.winfo_rooty()
+            x = px + max(0, (pw - w) // 2)
+            y = py + max(0, (ph - h) // 2)
+        except Exception:
+            x, y = 200, 200
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
+    def _on_accept(self) -> None:
+        foil_val = self._foil_var.get()
+        is_foil: bool | None = None
+        if foil_val == "Solo Foil":
+            is_foil = True
+        elif foil_val == "Solo Normal (No Foil)":
+            is_foil = False
+
+        proxy_val = self._proxy_var.get()
+        is_proxy: bool | None = None
+        if proxy_val == "Solo Proxies":
+            is_proxy = True
+        elif proxy_val == "Solo Físicas (Reales)":
+            is_proxy = False
+
+        cond_val = self._cond_var.get()
+        condition = None if cond_val == "[Sin cambios]" else cond_val
+
+        lang_val = self._lang_var.get()
+        language = None if lang_val == "[Sin cambios]" else lang_val
+
+        qty_mode = self._qty_mode_var.get()
+        set_quantity: int | None = None
+        quantity_delta: int | None = None
+        if qty_mode == "Establecer cantidad exacta":
+            set_quantity = max(1, self._qty_val_var.get())
+        elif qty_mode == "Sumar copias (+)":
+            quantity_delta = max(1, self._qty_val_var.get())
+        elif qty_mode == "Restar copias (-)":
+            quantity_delta = -max(1, self._qty_val_var.get())
+
+        if (
+            is_foil is None
+            and is_proxy is None
+            and condition is None
+            and language is None
+            and set_quantity is None
+            and quantity_delta is None
+        ):
+            messagebox.showinfo("Sin cambios", "No se seleccionó ninguna modificación para aplicar.", parent=self)
+            return
+
+        self.result = {
+            "is_foil": is_foil,
+            "is_proxy": is_proxy,
+            "condition": condition,
+            "language": language,
+            "set_quantity": set_quantity,
+            "quantity_delta": quantity_delta,
+        }
+        self.destroy()
+
+    def _on_cancel(self) -> None:
+        self.result = None
+        self.destroy()
+
+
+class BatchAssignDeckDialog(tk.Toplevel):
+    """Modal dialog to assign multiple selected inventory cards to a deck."""
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        cards: list[InventoryCard],
+        decks: list[DeckRecord],
+    ) -> None:
+        super().__init__(parent)
+        self.title(f"Asignar {len(cards)} cartas a un Mazo")
+        self.resizable(True, True)
+        self.transient(parent.winfo_toplevel() if hasattr(parent, "winfo_toplevel") else parent)
+        self.grab_set()
+
+        self.cards = cards
+        self.decks = decks
+        self.result: dict | None = None
+
+        self._deck_choice_var = tk.StringVar()
+        self._new_name_var = tk.StringVar()
+        self._new_format_var = tk.StringVar(value="Commander")
+        self._copies_mode_var = tk.StringVar(value="one")
+
+        self._build_ui()
+        self._center_window(parent)
+
+    def _build_ui(self) -> None:
+        container = ttk.Frame(self, padding=14)
+        container.pack(fill=tk.BOTH, expand=True)
+
+        header = ttk.Label(
+            container,
+            text=f"Asignar {len(self.cards)} cartas de tu colección a un mazo:",
+            font=("Segoe UI", 10, "bold"),
+        )
+        header.pack(anchor=tk.W, pady=(0, 8))
+
+        deck_frame = ttk.LabelFrame(container, text="Mazo de Destino", padding=(8, 6))
+        deck_frame.pack(fill=tk.X, pady=(0, 8))
+
+        deck_options = [f"{d.name} ({d.format})" for d in self.decks]
+        deck_options.append("➕ Crear nuevo mazo...")
+
+        ttk.Label(deck_frame, text="Mazo:").grid(row=0, column=0, sticky=tk.W, pady=4)
+        self.cb_deck = ttk.Combobox(
+            deck_frame,
+            textvariable=self._deck_choice_var,
+            values=deck_options,
+            state="readonly",
+            width=32,
+        )
+        self.cb_deck.grid(row=0, column=1, sticky=tk.W, padx=6, pady=4)
+        if self.decks:
+            self.cb_deck.current(0)
+        else:
+            self.cb_deck.current(0)
+
+        self.cb_deck.bind("<<ComboboxSelected>>", self._on_deck_selection_changed)
+
+        # New deck fields
+        self.new_deck_frame = ttk.Frame(deck_frame)
+        self.new_deck_frame.grid(row=1, column=0, columnspan=2, sticky=tk.EW, pady=(4, 0))
+
+        ttk.Label(self.new_deck_frame, text="Nombre del nuevo mazo:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.ent_new_name = ttk.Entry(self.new_deck_frame, textvariable=self._new_name_var, width=28)
+        self.ent_new_name.grid(row=0, column=1, sticky=tk.W, padx=6, pady=2)
+
+        ttk.Label(self.new_deck_frame, text="Formato:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.cb_new_format = ttk.Combobox(
+            self.new_deck_frame,
+            textvariable=self._new_format_var,
+            values=["Commander", "Modern", "Standard", "Pioneer", "Legacy", "Pauper", "Otro"],
+            state="readonly",
+            width=16,
+        )
+        self.cb_new_format.grid(row=1, column=1, sticky=tk.W, padx=6, pady=2)
+
+        self._on_deck_selection_changed()
+
+        # Copies Frame
+        copies_frame = ttk.LabelFrame(container, text="Copias a Asignar", padding=(8, 6))
+        copies_frame.pack(fill=tk.X, pady=(0, 8))
+
+        ttk.Radiobutton(
+            copies_frame,
+            text="1 copia por carta (Recomendado para Commander)",
+            value="one",
+            variable=self._copies_mode_var,
+        ).pack(anchor=tk.W, pady=2)
+
+        ttk.Radiobutton(
+            copies_frame,
+            text="Todas las copias disponibles en colección",
+            value="available",
+            variable=self._copies_mode_var,
+        ).pack(anchor=tk.W, pady=2)
+
+        # Cards summary table preview
+        cards_frame = ttk.LabelFrame(container, text="Resumen de cartas seleccionadas", padding=(6, 4))
+        cards_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+
+        tree = ttk.Treeview(
+            cards_frame,
+            columns=("name", "set", "num", "qty", "proxy"),
+            show="headings",
+            height=6,
+        )
+        tree.heading("name", text="Carta", anchor=tk.W)
+        tree.heading("set", text="Set", anchor=tk.CENTER)
+        tree.heading("num", text="Núm", anchor=tk.CENTER)
+        tree.heading("qty", text="Total", anchor=tk.CENTER)
+        tree.heading("proxy", text="Tipo", anchor=tk.CENTER)
+
+        tree.column("name", width=180, anchor=tk.W)
+        tree.column("set", width=50, anchor=tk.CENTER)
+        tree.column("num", width=45, anchor=tk.CENTER)
+        tree.column("qty", width=45, anchor=tk.CENTER)
+        tree.column("proxy", width=65, anchor=tk.CENTER)
+
+        sb = ttk.Scrollbar(cards_frame, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        for c in self.cards:
+            tree.insert(
+                "",
+                tk.END,
+                values=(
+                    c.name,
+                    c.set_code.upper() if c.set_code else "--",
+                    c.collector_number or "--",
+                    c.quantity,
+                    "Proxy" if c.is_proxy else "Real",
+                ),
+            )
+
+        btn_box = ttk.Frame(container)
+        btn_box.pack(fill=tk.X)
+        ttk.Button(btn_box, text="Cancelar", command=self._on_cancel).pack(side=tk.RIGHT, padx=(4, 0))
+        ttk.Button(btn_box, text="Asignar al Mazo", command=self._on_accept).pack(side=tk.RIGHT)
+
+        self.bind("<Escape>", lambda _e: self._on_cancel())
+
+    def _on_deck_selection_changed(self, _e=None) -> None:
+        sel = self._deck_choice_var.get()
+        if sel == "➕ Crear nuevo mazo...":
+            for child in self.new_deck_frame.winfo_children():
+                child.configure(state=tk.NORMAL)
+        else:
+            for child in self.new_deck_frame.winfo_children():
+                child.configure(state=tk.DISABLED)
+
+    def _center_window(self, parent: tk.Misc) -> None:
+        self.update_idletasks()
+        w, h = self.winfo_reqwidth(), self.winfo_reqheight()
+        w = max(w, 480)
+        h = max(h, 420)
+        try:
+            pw, ph = parent.winfo_width(), parent.winfo_height()
+            px, py = parent.winfo_rootx(), parent.winfo_rooty()
+            x = px + max(0, (pw - w) // 2)
+            y = py + max(0, (ph - h) // 2)
+        except Exception:
+            x, y = 200, 200
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
+    def _on_accept(self) -> None:
+        sel = self._deck_choice_var.get()
+        deck_id: int | None = None
+        new_name: str | None = None
+        new_format: str | None = None
+
+        if sel == "➕ Crear nuevo mazo...":
+            new_name = self._new_name_var.get().strip()
+            if not new_name:
+                messagebox.showwarning("Campo Requerido", "Introduce el nombre del nuevo mazo.", parent=self)
+                return
+            new_format = self._new_format_var.get().strip() or "Commander"
+        else:
+            idx = self.cb_deck.current()
+            if idx < 0 or idx >= len(self.decks):
+                messagebox.showwarning("Aviso", "Selecciona un mazo de la lista.", parent=self)
+                return
+            deck_id = self.decks[idx].id
+
+        self.result = {
+            "deck_id": deck_id,
+            "new_name": new_name,
+            "new_format": new_format,
+            "copies_mode": self._copies_mode_var.get(),
+        }
+        self.destroy()
+
+    def _on_cancel(self) -> None:
+        self.result = None
+        self.destroy()
+
+
 class InventoryView(ttk.Frame):
     """Main Inventory & Deck Binder view with interactive card preview tooltips."""
 
@@ -660,6 +1034,74 @@ class InventoryView(ttk.Frame):
         )
         btn_reset.pack(side=tk.RIGHT, padx=4)
 
+        # Bottom Container: Docked contextual batch bar + stats banner
+        self.bottom_container = ttk.Frame(parent)
+        self.bottom_container.pack(fill=tk.X, side=tk.BOTTOM)
+
+        # Contextual Batch Action Bar (docked above stats, visible when 1 or more cards selected)
+        self.batch_bar_frame = ttk.LabelFrame(self.bottom_container, text="⚡ Operaciones en Lote", padding=(6, 4))
+
+        self.lbl_batch_count = ttk.Label(
+            self.batch_bar_frame,
+            text="📌 0 cartas seleccionadas",
+            font=("Segoe UI", 9, "bold"),
+            foreground="#1a5276",
+        )
+        self.lbl_batch_count.pack(side=tk.LEFT, padx=(4, 10))
+
+        self.btn_batch_proxy = ttk.Button(
+            self.batch_bar_frame,
+            text="🏷️ Proxy / Real",
+            command=self._on_batch_toggle_proxy_click,
+        )
+        self.btn_batch_proxy.pack(side=tk.LEFT, padx=2)
+
+        self.btn_batch_foil = ttk.Button(
+            self.batch_bar_frame,
+            text="✨ Foil / No Foil",
+            command=self._on_batch_toggle_foil_click,
+        )
+        self.btn_batch_foil.pack(side=tk.LEFT, padx=2)
+
+        self.btn_batch_edit = ttk.Button(
+            self.batch_bar_frame,
+            text="✏️ Edición en Lote...",
+            command=self._on_batch_edit_click,
+        )
+        self.btn_batch_edit.pack(side=tk.LEFT, padx=2)
+
+        self.btn_batch_deck = ttk.Button(
+            self.batch_bar_frame,
+            text="🎴 Asignar a Mazo...",
+            command=self._on_batch_assign_deck_click,
+        )
+        self.btn_batch_deck.pack(side=tk.LEFT, padx=2)
+
+        self.btn_batch_delete = ttk.Button(
+            self.batch_bar_frame,
+            text="🗑️ Eliminar",
+            command=self._on_batch_delete_click,
+        )
+        self.btn_batch_delete.pack(side=tk.LEFT, padx=2)
+
+        self.btn_batch_clear = ttk.Button(
+            self.batch_bar_frame,
+            text="✖️ Deseleccionar",
+            command=self._on_deselect_all_cards,
+        )
+        self.btn_batch_clear.pack(side=tk.RIGHT, padx=4)
+
+        # Bottom stats banner
+        stats_frame = ttk.Frame(self.bottom_container, padding=(6, 4))
+        stats_frame.pack(fill=tk.X, side=tk.BOTTOM)
+        self.lbl_stats = ttk.Label(
+            stats_frame,
+            text="Colección: 0 cartas | Físicas: 0 | Proxies: 0 | Mazos: 0",
+            font=("Segoe UI", 9),
+            foreground="#444444",
+        )
+        self.lbl_stats.pack(side=tk.LEFT)
+
         # Collection Treeview Table
         tree_frame = ttk.Frame(parent)
         tree_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
@@ -676,7 +1118,7 @@ class InventoryView(ttk.Frame):
             "condition",
             "language",
         )
-        self.inv_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", selectmode="browse")
+        self.inv_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", selectmode="extended")
 
         self._update_inv_column_headings()
 
@@ -708,19 +1150,16 @@ class InventoryView(ttk.Frame):
         # Double-click opens card deck usages dialog
         self.inv_tree.bind("<Double-1>", self._on_card_double_click)
 
+        # Treeview selection changes update the batch action bar
+        self.inv_tree.bind("<<TreeviewSelect>>", lambda _e: self._update_batch_bar())
+
+        # Keyboard shortcuts: Select All (Cmd/Ctrl+A), Deselect (Esc)
+        self.inv_tree.bind("<Control-a>", self._on_select_all_cards)
+        self.inv_tree.bind("<Command-a>", self._on_select_all_cards)
+        self.inv_tree.bind("<Escape>", self._on_deselect_all_cards)
+
         # Attach Floating Preview Tooltip
         self._preview_hover.attach_to_treeview(self.inv_tree, self._resolve_inv_card_preview)
-
-        # Bottom stats banner
-        stats_frame = ttk.Frame(parent, padding=(6, 4))
-        stats_frame.pack(fill=tk.X, side=tk.BOTTOM)
-        self.lbl_stats = ttk.Label(
-            stats_frame,
-            text="Colección: 0 cartas | Físicas: 0 | Proxies: 0 | Mazos: 0",
-            font=("Segoe UI", 9),
-            foreground="#444444",
-        )
-        self.lbl_stats.pack(side=tk.LEFT)
 
     def _toggle_advanced_filters(self) -> None:
         if self._adv_filters_visible:
@@ -891,6 +1330,8 @@ class InventoryView(ttk.Frame):
             self._inv_item_to_card[item_id] = card
             self._inv_item_to_usage[item_id] = (in_decks_qty, available_qty)
 
+        self._update_batch_bar()
+
     def _on_card_double_click(self, _event=None) -> None:
         self._open_selected_card_usage_dialog()
 
@@ -964,23 +1405,212 @@ class InventoryView(ttk.Frame):
             self.inventory_service.add_or_update_card(dlg.result)
             self.refresh_data()
 
+    def _on_select_all_cards(self, _event=None) -> str:
+        all_items = self.inv_tree.get_children()
+        if all_items:
+            self.inv_tree.selection_set(all_items)
+            self._update_batch_bar()
+        return "break"
+
+    def _on_deselect_all_cards(self, _event=None) -> str:
+        self.inv_tree.selection_set(())
+        self._update_batch_bar()
+        return "break"
+
+    def _update_batch_bar(self) -> None:
+        selected_items = self.inv_tree.selection()
+        if not selected_items:
+            if hasattr(self, "batch_bar_frame") and self.batch_bar_frame.winfo_manager() == "pack":
+                self.batch_bar_frame.pack_forget()
+            return
+
+        count = len(selected_items)
+        total_copies = 0
+        for item_id in selected_items:
+            card = self._inv_item_to_card.get(item_id)
+            if card:
+                total_copies += card.quantity
+
+        plural_cards = "cartas" if count != 1 else "carta"
+        plural_copies = "copias" if total_copies != 1 else "copia"
+        self.lbl_batch_count.configure(
+            text=f"📌 {count} {plural_cards} seleccionadas ({total_copies} {plural_copies} en total)"
+        )
+
+        if hasattr(self, "batch_bar_frame") and self.batch_bar_frame.winfo_manager() != "pack":
+            self.batch_bar_frame.pack(side=tk.TOP, fill=tk.X, padx=4, pady=(2, 4))
+
+    def _on_batch_toggle_proxy_click(self) -> None:
+        selected_items = self.inv_tree.selection()
+        if not selected_items:
+            return
+        cards = [self._inv_item_to_card[i] for i in selected_items if i in self._inv_item_to_card]
+        if not cards:
+            return
+
+        all_real = all(not c.is_proxy for c in cards)
+        all_proxy = all(c.is_proxy for c in cards)
+
+        if all_real:
+            target_proxy = True
+        elif all_proxy:
+            target_proxy = False
+        else:
+            choice = messagebox.askyesnocancel(
+                "Marcar Proxy / Físicas",
+                "Las cartas seleccionadas tienen estados mixtos (físicas y proxies).\n\n"
+                "• Pulsa Sí para marcar todas como PROXY.\n"
+                "• Pulsa No para marcar todas como FÍSICAS (Reales).\n"
+                "• Pulsa Cancelar para no realizar cambios.",
+                parent=self,
+            )
+            if choice is None:
+                return
+            target_proxy = choice
+
+        card_ids = [c.id for c in cards if c.id is not None]
+        self.inventory_service.batch_update_cards(card_ids, is_proxy=target_proxy)
+        self.refresh_data()
+
+    def _on_batch_toggle_foil_click(self) -> None:
+        selected_items = self.inv_tree.selection()
+        if not selected_items:
+            return
+        cards = [self._inv_item_to_card[i] for i in selected_items if i in self._inv_item_to_card]
+        if not cards:
+            return
+
+        all_normal = all(not c.is_foil for c in cards)
+        all_foil = all(c.is_foil for c in cards)
+
+        if all_normal:
+            target_foil = True
+        elif all_foil:
+            target_foil = False
+        else:
+            choice = messagebox.askyesnocancel(
+                "Marcar Foil / Normal",
+                "Las cartas seleccionadas tienen acabados mixtos (normales y foil).\n\n"
+                "• Pulsa Sí para marcar todas como FOIL.\n"
+                "• Pulsa No para marcar todas como NORMAL (No Foil).\n"
+                "• Pulsa Cancelar para no realizar cambios.",
+                parent=self,
+            )
+            if choice is None:
+                return
+            target_foil = choice
+
+        card_ids = [c.id for c in cards if c.id is not None]
+        self.inventory_service.batch_update_cards(card_ids, is_foil=target_foil)
+        self.refresh_data()
+
+    def _on_batch_edit_click(self) -> None:
+        selected_items = self.inv_tree.selection()
+        if not selected_items:
+            return
+        cards = [self._inv_item_to_card[i] for i in selected_items if i in self._inv_item_to_card]
+        if not cards:
+            return
+
+        dlg = BatchEditCardsDialog(self, count=len(cards))
+        self.wait_window(dlg)
+        if not dlg.result:
+            return
+
+        card_ids = [c.id for c in cards if c.id is not None]
+        self.inventory_service.batch_update_cards(
+            card_ids,
+            is_proxy=dlg.result["is_proxy"],
+            is_foil=dlg.result["is_foil"],
+            condition=dlg.result["condition"],
+            language=dlg.result["language"],
+            set_quantity=dlg.result["set_quantity"],
+            quantity_delta=dlg.result["quantity_delta"],
+        )
+        self.refresh_data()
+
+    def _on_batch_assign_deck_click(self) -> None:
+        selected_items = self.inv_tree.selection()
+        if not selected_items:
+            return
+        cards = [self._inv_item_to_card[i] for i in selected_items if i in self._inv_item_to_card]
+        if not cards:
+            return
+
+        decks = self.inventory_service.get_all_decks()
+        dlg = BatchAssignDeckDialog(self, cards=cards, decks=decks)
+        self.wait_window(dlg)
+        if not dlg.result:
+            return
+
+        deck_id = dlg.result["deck_id"]
+        if deck_id is None:
+            new_name = dlg.result.get("new_name") or "Nuevo Mazo"
+            new_fmt = dlg.result.get("new_format") or "Commander"
+            deck_id = self.inventory_service.register_deck(
+                DeckRecord(name=new_name, format=new_fmt),
+                cards=[],
+            )
+            deck_display = new_name
+        else:
+            match_deck = next((d for d in decks if d.id == deck_id), None)
+            deck_display = match_deck.name if match_deck else f"Mazo #{deck_id}"
+
+        card_ids = [c.id for c in cards if c.id is not None]
+        assigned = self.inventory_service.batch_assign_to_deck(
+            deck_id=deck_id,
+            card_ids=card_ids,
+            copies_mode=dlg.result.get("copies_mode", "one"),
+        )
+        self.refresh_data()
+        messagebox.showinfo(
+            "Cartas Asignadas",
+            f"Se han asignado/actualizado {assigned} carta(s) en el mazo '{deck_display}'.",
+            parent=self,
+        )
+
     def _on_delete_card_click(self) -> None:
+        self._on_batch_delete_click()
+
+    def _on_batch_delete_click(self) -> None:
         selected = self.inv_tree.selection()
         if not selected:
-            messagebox.showwarning("Aviso", "Selecciona una carta del inventario para eliminar.", parent=self)
+            messagebox.showwarning("Aviso", "Selecciona una o más cartas del inventario para eliminar.", parent=self)
             return
 
-        item_id = selected[0]
-        card = self._inv_item_to_card.get(item_id)
-        if not card or card.id is None:
+        cards = [self._inv_item_to_card[i] for i in selected if i in self._inv_item_to_card]
+        if not cards:
             return
 
-        if messagebox.askyesno(
-            "Confirmar Eliminación",
-            f"¿Seguro que deseas eliminar '{card.name}' ({card.set_code.upper()} #{card.collector_number})?",
-            parent=self,
-        ):
-            self.inventory_service.delete_card(card.id)
+        count = len(cards)
+        total_copies = sum(c.quantity for c in cards)
+        card_ids = [c.id for c in cards if c.id is not None]
+
+        # Check usages in registered decks
+        deck_usages = self.inventory_service.check_cards_in_decks(card_ids)
+        cards_in_decks = {cid: dnames for cid, dnames in deck_usages.items() if dnames}
+
+        if count == 1:
+            c = cards[0]
+            msg = f"¿Seguro que deseas eliminar '{c.name}' ({c.set_code.upper()} #{c.collector_number}) con {c.quantity} copia(s)?"
+        else:
+            msg = f"¿Estás seguro de que deseas eliminar {count} cartas ({total_copies} copias en total) de tu inventario?"
+
+        if cards_in_decks:
+            msg += "\n\n⚠️ ADVERTENCIA: Las siguientes cartas están asignadas a mazos registrados:\n"
+            card_by_id = {c.id: c for c in cards}
+            for cid, dnames in list(cards_in_decks.items())[:8]:
+                card_obj = card_by_id.get(cid)
+                c_title = card_obj.name if card_obj else f"ID {cid}"
+                msg += f" • {c_title} (en: {', '.join(dnames)})\n"
+            if len(cards_in_decks) > 8:
+                msg += f" ... y {len(cards_in_decks) - 8} carta(s) más.\n"
+            msg += "\nSi las eliminas, aparecerán como faltantes (proxies a imprimir) en dichos mazos.\n"
+
+        msg += "\nEsta acción no se puede deshacer."
+
+        if messagebox.askyesno("Confirmar Eliminación", msg, parent=self):
+            self.inventory_service.batch_delete_cards(card_ids)
             self.refresh_data()
 
     # ---------------------------------------------------------------------------

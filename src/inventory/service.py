@@ -216,6 +216,253 @@ class InventoryService:
             cursor = conn.execute("DELETE FROM inventory_cards WHERE id = ?", (card_id,))
             return cursor.rowcount > 0
 
+    def batch_delete_cards(self, card_ids: list[int]) -> int:
+        """Delete multiple inventory cards by ID in a single transaction.
+
+        Returns the number of deleted records.
+        """
+        if not card_ids:
+            return 0
+        with get_db(self.db_path) as conn:
+            placeholders = ",".join("?" for _ in card_ids)
+            cursor = conn.execute(
+                f"DELETE FROM inventory_cards WHERE id IN ({placeholders})",
+                card_ids,
+            )
+            return cursor.rowcount
+
+    def check_cards_in_decks(self, card_ids: list[int]) -> dict[int, list[str]]:
+        """Check which cards are currently in use in registered decks.
+
+        Returns a dictionary mapping card_id -> list of deck names.
+        """
+        if not card_ids:
+            return {}
+
+        result: dict[int, list[str]] = {cid: [] for cid in card_ids}
+        with get_db(self.db_path) as conn:
+            placeholders = ",".join("?" for _ in card_ids)
+            cards = conn.execute(
+                f"SELECT id, oracle_id, name FROM inventory_cards WHERE id IN ({placeholders})",
+                card_ids,
+            ).fetchall()
+
+            if not cards:
+                return result
+
+            deck_cards = conn.execute(
+                """
+                SELECT d.name AS deck_name, dc.oracle_id, LOWER(dc.name) AS lower_name
+                FROM deck_cards dc
+                JOIN decks d ON d.id = dc.deck_id
+                """
+            ).fetchall()
+
+            for c in cards:
+                cid = c["id"]
+                coid = (c["oracle_id"] or "").strip()
+                cname = (c["name"] or "").strip().lower()
+                matching_decks = set()
+                for dc in deck_cards:
+                    if (coid and dc["oracle_id"] == coid) or (cname and dc["lower_name"] == cname):
+                        matching_decks.add(dc["deck_name"])
+                result[cid] = sorted(matching_decks)
+
+        return result
+
+    def batch_update_cards(
+        self,
+        card_ids: list[int],
+        *,
+        is_proxy: bool | None = None,
+        is_foil: bool | None = None,
+        condition: str | None = None,
+        language: str | None = None,
+        quantity_delta: int | None = None,
+        set_quantity: int | None = None,
+    ) -> int:
+        """Batch update attributes across multiple inventory cards.
+
+        If updating is_proxy or is_foil causes a card to match an existing card
+        with identical (set_code, collector_number, is_foil, is_proxy), quantities
+        are merged into the existing card and the duplicate card row is deleted.
+
+        Returns the number of cards successfully updated or merged.
+        """
+        if not card_ids:
+            return 0
+
+        updated_count = 0
+        with get_db(self.db_path) as conn:
+            for cid in card_ids:
+                row = conn.execute(
+                    """
+                    SELECT id, oracle_id, name, set_code, collector_number,
+                           quantity, is_foil, is_proxy, condition, language, metadata_json
+                    FROM inventory_cards
+                    WHERE id = ?
+                    """,
+                    (cid,),
+                ).fetchone()
+                if not row:
+                    continue
+
+                cur_proxy = bool(row["is_proxy"])
+                cur_foil = bool(row["is_foil"])
+                cur_qty = int(row["quantity"])
+                cur_cond = str(row["condition"])
+                cur_lang = str(row["language"])
+                set_code = str(row["set_code"])
+                collector_num = str(row["collector_number"])
+
+                new_proxy = is_proxy if is_proxy is not None else cur_proxy
+                new_foil = is_foil if is_foil is not None else cur_foil
+                new_cond = condition if condition is not None else cur_cond
+                new_lang = language if language is not None else cur_lang
+
+                if set_quantity is not None:
+                    new_qty = max(1, set_quantity)
+                elif quantity_delta is not None:
+                    new_qty = max(1, cur_qty + quantity_delta)
+                else:
+                    new_qty = cur_qty
+
+                # Check if there is an existing matching card with the target proxy/foil
+                existing = conn.execute(
+                    """
+                    SELECT id, quantity FROM inventory_cards
+                    WHERE set_code = ? AND collector_number = ? AND is_foil = ? AND is_proxy = ? AND id != ?
+                    """,
+                    (
+                        set_code,
+                        collector_num,
+                        1 if new_foil else 0,
+                        1 if new_proxy else 0,
+                        cid,
+                    ),
+                ).fetchone()
+
+                if existing:
+                    # Merge quantity into existing card and delete current card
+                    merged_qty = existing["quantity"] + new_qty
+                    conn.execute(
+                        "UPDATE inventory_cards SET quantity = ? WHERE id = ?",
+                        (merged_qty, existing["id"]),
+                    )
+                    conn.execute("DELETE FROM inventory_cards WHERE id = ?", (cid,))
+                else:
+                    # Normal update
+                    conn.execute(
+                        """
+                        UPDATE inventory_cards SET
+                            is_foil = ?,
+                            is_proxy = ?,
+                            condition = ?,
+                            language = ?,
+                            quantity = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            1 if new_foil else 0,
+                            1 if new_proxy else 0,
+                            new_cond,
+                            new_lang,
+                            new_qty,
+                            cid,
+                        ),
+                    )
+                updated_count += 1
+
+        return updated_count
+
+    def batch_assign_to_deck(
+        self,
+        deck_id: int,
+        card_ids: list[int],
+        copies_mode: str | int = "one",
+    ) -> int:
+        """Batch assign inventory cards to a registered deck.
+
+        Args:
+            deck_id: Target deck ID.
+            card_ids: List of inventory card IDs to assign.
+            copies_mode: 'one' (1 copy), 'available' (all available copies), or an integer count.
+
+        Returns:
+            Number of cards assigned or incremented.
+        """
+        if not card_ids:
+            return 0
+
+        assigned_count = 0
+        with get_db(self.db_path) as conn:
+            deck = conn.execute("SELECT id FROM decks WHERE id = ?", (deck_id,)).fetchone()
+            if not deck:
+                raise ValueError(f"Deck with id {deck_id} does not exist.")
+
+            placeholders = ",".join("?" for _ in card_ids)
+            cards = conn.execute(
+                f"""
+                SELECT id, oracle_id, name, set_code, collector_number, quantity, is_proxy
+                FROM inventory_cards
+                WHERE id IN ({placeholders})
+                """,
+                card_ids,
+            ).fetchall()
+
+            for card in cards:
+                if copies_mode == "available":
+                    usages = conn.execute(
+                        """
+                        SELECT SUM(quantity_required) as total_used
+                        FROM deck_cards
+                        WHERE oracle_id = ? OR LOWER(name) = LOWER(?)
+                        """,
+                        (card["oracle_id"], card["name"]),
+                    ).fetchone()
+                    used = int(usages["total_used"] or 0) if (usages and usages["total_used"]) else 0
+                    copies = max(1, card["quantity"] - used)
+                elif isinstance(copies_mode, int):
+                    copies = max(1, copies_mode)
+                else:
+                    copies = 1
+
+                existing_dc = conn.execute(
+                    """
+                    SELECT id, quantity_required FROM deck_cards
+                    WHERE deck_id = ? AND set_code = ? AND collector_number = ?
+                    """,
+                    (deck_id, card["set_code"], card["collector_number"]),
+                ).fetchone()
+
+                if existing_dc:
+                    conn.execute(
+                        "UPDATE deck_cards SET quantity_required = quantity_required + ? WHERE id = ?",
+                        (copies, existing_dc["id"]),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        INSERT INTO deck_cards (
+                            deck_id, oracle_id, name, set_code, collector_number,
+                            quantity_required, is_proxy
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            deck_id,
+                            card["oracle_id"],
+                            card["name"],
+                            card["set_code"],
+                            card["collector_number"],
+                            copies,
+                            1 if card["is_proxy"] else 0,
+                        ),
+                    )
+                assigned_count += 1
+
+        return assigned_count
+
+
     def get_all_decks(self) -> list[DeckRecord]:
         """Fetch all registered decks."""
         with get_db(self.db_path) as conn:
