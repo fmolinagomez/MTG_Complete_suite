@@ -54,6 +54,9 @@ class DeckCardEntry:
     collector_number: str
     quantity_required: int
     is_proxy: bool = False
+    physical_quantity: int = 0
+    proxy_quantity: int = 0
+    fulfilled_card_id: int | None = None
     id: int | None = None
 
 
@@ -82,4 +85,8 @@ class DeckCardMatchDetail:
     status: str = "missing"  # "exact", "alternative", "partial", "missing"
     oracle_id: str = ""
     deck_card_id: int | None = None
+    available_versions: list[dict] = field(default_factory=list)
+    assigned_version_id: int | None = None
+    physical_quantity: int = 0
+    proxy_quantity: int = 0
 

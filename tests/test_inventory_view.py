@@ -606,16 +606,16 @@ class TestInventoryView:
         # Sol Ring is owned (stock = 1, status = 🟢 Exacta)
         sol_row = [view.deck_tree.item(r)["values"] for r in rows if "Sol Ring" in view.deck_tree.item(r)["values"][0]][0]
         assert sol_row[3] == 1  # required
-        assert sol_row[4] == 1  # exact stock
-        assert sol_row[5] == 0  # alt stock
-        assert "Exacta" in sol_row[6]
+        assert sol_row[5] == 1  # physical quantity
+        assert sol_row[6] == 0  # proxy quantity
+        assert "Exacta" in sol_row[7]
 
         # Mana Vault is missing (stock = 0, status = 🔴 Faltante (Proxy))
         vault_row = [view.deck_tree.item(r)["values"] for r in rows if "Mana Vault" in view.deck_tree.item(r)["values"][0]][0]
         assert vault_row[3] == 1  # required
-        assert vault_row[4] == 0  # exact stock
-        assert vault_row[5] == 0  # alt stock
-        assert "Faltante" in vault_row[6]
+        assert vault_row[5] == 0  # physical quantity
+        assert vault_row[6] == 1  # proxy quantity
+        assert "Faltante" in vault_row[7]
 
         # Plan summary text
         assert "Requeridas: 2" in view.lbl_plan_summary.cget("text")
@@ -662,25 +662,25 @@ class TestInventoryView:
         # Exact match
         exact_item = [it for it in items if it["values"][1] == "C21"][0]
         assert exact_item["values"][3] == 1  # required
-        assert exact_item["values"][4] == 1  # exact_stock
-        assert exact_item["values"][5] == 1  # alt_stock (1 other Sol Ring print in collection)
-        assert "Exacta" in exact_item["values"][6]
+        assert exact_item["values"][5] == 1  # physical quantity
+        assert exact_item["values"][6] == 0  # proxy quantity
+        assert "Exacta" in exact_item["values"][7]
         assert "owned" in exact_item["tags"]
 
         # Alternative match
         alt_item = [it for it in items if it["values"][1] == "CMD"][0]
         assert alt_item["values"][3] == 1  # required
-        assert alt_item["values"][4] == 0  # exact_stock
-        assert alt_item["values"][5] == 1  # alt_stock
-        assert "Alternativa" in alt_item["values"][6]
+        assert alt_item["values"][5] == 1  # physical quantity
+        assert alt_item["values"][6] == 0  # proxy quantity
+        assert "Alternativa" in alt_item["values"][7]
         assert "alt_stock" in alt_item["tags"]
 
         # Missing
         missing_item = [it for it in items if "Mana Crypt" in it["values"][0]][0]
         assert missing_item["values"][3] == 1  # required
-        assert missing_item["values"][4] == 0  # exact_stock
-        assert missing_item["values"][5] == 0  # alt_stock
-        assert "Faltante" in missing_item["values"][6]
+        assert missing_item["values"][5] == 0  # physical quantity
+        assert missing_item["values"][6] == 1  # proxy quantity
+        assert "Faltante" in missing_item["values"][7]
         assert "missing" in missing_item["tags"]
 
         # Summary text
@@ -785,8 +785,8 @@ class TestInventoryView:
         rows = view.deck_tree.get_children()
         sol_row = view.deck_tree.item(rows[0])["values"]
         # With default include_proxies=True:
-        assert sol_row[4] == 1  # exact stock = 1
-        assert "Exacta" in sol_row[6]
+        assert sol_row[5] == 1  # physical quantity = 1
+        assert "Exacta" in sol_row[7]
 
         # Toggle include_proxies to False
         view._deck_include_proxies_var.set(False)
@@ -794,16 +794,16 @@ class TestInventoryView:
 
         rows_after = view.deck_tree.get_children()
         sol_row_after = view.deck_tree.item(rows_after[0])["values"]
-        assert sol_row_after[4] == 0  # exact stock = 0
-        assert "Faltante" in sol_row_after[6]
+        assert sol_row_after[5] == 0  # physical quantity = 0
+        assert "Faltante" in sol_row_after[7]
 
         # Toggle back to True
         view._deck_include_proxies_var.set(True)
         view._on_deck_options_changed()
         rows_back = view.deck_tree.get_children()
         sol_row_back = view.deck_tree.item(rows_back[0])["values"]
-        assert sol_row_back[4] == 1
-        assert "Exacta" in sol_row_back[6]
+        assert sol_row_back[5] == 1
+        assert "Exacta" in sol_row_back[7]
 
         view.destroy()
 

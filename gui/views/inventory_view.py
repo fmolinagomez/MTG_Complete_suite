@@ -875,6 +875,8 @@ class InventoryView(ttk.Frame):
         self._inv_item_to_card: dict[str, InventoryCard] = {}
         self._inv_item_to_usage: dict[str, tuple[int, int]] = {}
         self._deck_item_to_info: dict[str, CardPreviewInfo] = {}
+        self._deck_row_data: dict[str, DeckCardMatchDetail] = {}
+        self._active_cell_editor: tk.Widget | None = None
         self._registered_decks: list[DeckRecord] = []
         self._current_deck_id: int | None = None
         self._current_deck_cards: list[DeckCardEntry] = []
@@ -1668,24 +1670,40 @@ class InventoryView(ttk.Frame):
         table_frame = ttk.Frame(parent)
         table_frame.pack(fill=tk.BOTH, expand=True, padx=6, pady=4)
 
-        deck_cols = ("name", "set_code", "collector_number", "qty_required", "exact_stock", "alt_stock", "status")
+        deck_cols = (
+            "name",
+            "set_code",
+            "collector_number",
+            "qty_required",
+            "assigned_version",
+            "physical_qty",
+            "proxy_qty",
+            "status",
+            "is_proxy",
+        )
         self.deck_tree = ttk.Treeview(table_frame, columns=deck_cols, show="headings", selectmode="browse")
 
         self.deck_tree.heading("name", text="Carta", anchor=tk.W)
         self.deck_tree.heading("set_code", text="Edición Mazo", anchor=tk.CENTER)
         self.deck_tree.heading("collector_number", text="Número", anchor=tk.CENTER)
-        self.deck_tree.heading("qty_required", text="Requeridas", anchor=tk.CENTER)
-        self.deck_tree.heading("exact_stock", text="Stock Exacto", anchor=tk.CENTER)
-        self.deck_tree.heading("alt_stock", text="Stock Alternativo", anchor=tk.CENTER)
+        self.deck_tree.heading("qty_required", text="Req.", anchor=tk.CENTER)
+        self.deck_tree.heading("assigned_version", text="Versión Asignada (Inventario)", anchor=tk.W)
+        self.deck_tree.heading("physical_qty", text="Físicas", anchor=tk.CENTER)
+        self.deck_tree.heading("proxy_qty", text="Proxies", anchor=tk.CENTER)
         self.deck_tree.heading("status", text="Estado", anchor=tk.CENTER)
+        self.deck_tree.heading("is_proxy", text="Proxy?", anchor=tk.CENTER)
 
-        self.deck_tree.column("name", width=240, minwidth=130, anchor=tk.W)
-        self.deck_tree.column("set_code", width=85, minwidth=60, anchor=tk.CENTER)
-        self.deck_tree.column("collector_number", width=65, minwidth=45, anchor=tk.CENTER)
-        self.deck_tree.column("qty_required", width=85, minwidth=60, anchor=tk.CENTER)
-        self.deck_tree.column("exact_stock", width=85, minwidth=60, anchor=tk.CENTER)
-        self.deck_tree.column("alt_stock", width=110, minwidth=70, anchor=tk.CENTER)
-        self.deck_tree.column("status", width=170, minwidth=110, anchor=tk.CENTER)
+        self.deck_tree.column("name", width=190, minwidth=110, anchor=tk.W)
+        self.deck_tree.column("set_code", width=80, minwidth=50, anchor=tk.CENTER)
+        self.deck_tree.column("collector_number", width=55, minwidth=40, anchor=tk.CENTER)
+        self.deck_tree.column("qty_required", width=50, minwidth=35, anchor=tk.CENTER)
+        self.deck_tree.column("assigned_version", width=220, minwidth=130, anchor=tk.W)
+        self.deck_tree.column("physical_qty", width=60, minwidth=45, anchor=tk.CENTER)
+        self.deck_tree.column("proxy_qty", width=60, minwidth=45, anchor=tk.CENTER)
+        self.deck_tree.column("status", width=135, minwidth=90, anchor=tk.CENTER)
+        self.deck_tree.column("is_proxy", width=55, minwidth=45, anchor=tk.CENTER)
+
+        self.deck_tree.bind("<Button-1>", self._on_deck_tree_click)
 
         vsb_deck = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.deck_tree.yview)
         hsb_deck = ttk.Scrollbar(table_frame, orient=tk.HORIZONTAL, command=self.deck_tree.xview)
@@ -1808,6 +1826,163 @@ class InventoryView(ttk.Frame):
                 self._select_deck(d)
                 break
 
+    def _destroy_active_cell_editor(self) -> None:
+        if self._active_cell_editor is not None:
+            try:
+                self._active_cell_editor.destroy()
+            except Exception:
+                pass
+            self._active_cell_editor = None
+
+    def _on_deck_tree_click(self, event: tk.Event) -> None:
+        self._destroy_active_cell_editor()
+        region = self.deck_tree.identify("region", event.x, event.y)
+        if region != "cell":
+            return
+
+        row_id = self.deck_tree.identify_row(event.y)
+        col_id = self.deck_tree.identify_column(event.x)
+        if not row_id or not col_id:
+            return
+
+        detail = self._deck_row_data.get(row_id)
+        if not detail or detail.deck_card_id is None:
+            return
+
+        # Column #9 is is_proxy toggle
+        if col_id == "#9":
+            if detail.physical_quantity > 0:
+                new_phys = 0
+                new_proxy = detail.quantity_required
+                new_fulfilled = detail.assigned_version_id
+            else:
+                max_avail = sum(v["quantity_available"] for v in detail.available_versions) if detail.available_versions else detail.exact_stock + detail.alt_stock
+                new_phys = min(detail.quantity_required, max_avail)
+                new_proxy = detail.quantity_required - new_phys
+                new_fulfilled = detail.assigned_version_id
+
+            self.inventory_service.update_deck_card_allocation(
+                detail.deck_card_id,
+                physical_quantity=new_phys,
+                proxy_quantity=new_proxy,
+                fulfilled_card_id=new_fulfilled,
+            )
+            if self._current_deck_id is not None:
+                deck_data = self.inventory_service.get_deck_by_id(self._current_deck_id)
+                if deck_data:
+                    self._select_deck(deck_data[0])
+            return
+
+        # Column #5 is assigned_version dropdown
+        elif col_id == "#5":
+            if not detail.available_versions:
+                return
+
+            bbox = self.deck_tree.bbox(row_id, "assigned_version")
+            if not bbox:
+                return
+            x, y, w, h = bbox
+
+            options = ["Auto: Mejor combinación (Stock disponible)"]
+            option_to_card_id: dict[str, int | None] = {"Auto: Mejor combinación (Stock disponible)": None}
+
+            for v in detail.available_versions:
+                lbl = v["label"]
+                options.append(lbl)
+                option_to_card_id[lbl] = v["card_id"]
+
+            options.append("Ninguna (Solo Proxy)")
+            option_to_card_id["Ninguna (Solo Proxy)"] = -1
+
+            cb = ttk.Combobox(self.deck_tree, values=options, state="readonly")
+            cb.place(x=x, y=y, width=max(w, 230), height=h)
+            self._active_cell_editor = cb
+
+            if detail.physical_quantity == 0 and detail.proxy_quantity > 0:
+                cb.set("Ninguna (Solo Proxy)")
+            elif detail.assigned_version_id is not None:
+                match_lbl = next((v["label"] for v in detail.available_versions if v["card_id"] == detail.assigned_version_id), None)
+                cb.set(match_lbl or options[0])
+            else:
+                cb.set(options[0])
+
+            def _on_version_selected(_ev=None) -> None:
+                chosen = cb.get()
+                self._destroy_active_cell_editor()
+                card_id_target = option_to_card_id.get(chosen)
+
+                if card_id_target == -1:
+                    new_phys = 0
+                    new_proxy = detail.quantity_required
+                    new_fulfilled = None
+                elif card_id_target is None:
+                    new_fulfilled = None
+                    max_avail = sum(v["quantity_available"] for v in detail.available_versions)
+                    new_phys = min(detail.quantity_required, max_avail)
+                    new_proxy = detail.quantity_required - new_phys
+                else:
+                    new_fulfilled = card_id_target
+                    target_v = next((v for v in detail.available_versions if v["card_id"] == card_id_target), None)
+                    v_avail = target_v["quantity_available"] if target_v else 0
+                    new_phys = min(detail.quantity_required, v_avail)
+                    new_proxy = detail.quantity_required - new_phys
+
+                self.inventory_service.update_deck_card_allocation(
+                    detail.deck_card_id,
+                    physical_quantity=new_phys,
+                    proxy_quantity=new_proxy,
+                    fulfilled_card_id=new_fulfilled,
+                )
+                if self._current_deck_id is not None:
+                    deck_data = self.inventory_service.get_deck_by_id(self._current_deck_id)
+                    if deck_data:
+                        self._select_deck(deck_data[0])
+
+            cb.bind("<<ComboboxSelected>>", _on_version_selected)
+            cb.bind("<FocusOut>", lambda _e: self._destroy_active_cell_editor())
+            cb.focus_set()
+            return
+
+        # Column #6 is physical_qty spinbox
+        elif col_id == "#6":
+            bbox = self.deck_tree.bbox(row_id, "physical_qty")
+            if not bbox:
+                return
+            x, y, w, h = bbox
+
+            max_possible = sum(v["quantity_available"] for v in detail.available_versions) if detail.available_versions else detail.exact_stock + detail.alt_stock
+            max_limit = min(detail.quantity_required, max_possible)
+
+            sp = ttk.Spinbox(self.deck_tree, from_=0, to=max(0, max_limit), width=5)
+            sp.set(detail.physical_quantity)
+            sp.place(x=x, y=y, width=w, height=h)
+            self._active_cell_editor = sp
+
+            def _on_spin_commit(_ev=None) -> None:
+                val_str = sp.get().strip()
+                self._destroy_active_cell_editor()
+                try:
+                    val = int(val_str)
+                except ValueError:
+                    return
+                new_phys = max(0, min(max_limit, val))
+                new_proxy = detail.quantity_required - new_phys
+                self.inventory_service.update_deck_card_allocation(
+                    detail.deck_card_id,
+                    physical_quantity=new_phys,
+                    proxy_quantity=new_proxy,
+                    fulfilled_card_id=detail.assigned_version_id,
+                )
+                if self._current_deck_id is not None:
+                    deck_data = self.inventory_service.get_deck_by_id(self._current_deck_id)
+                    if deck_data:
+                        self._select_deck(deck_data[0])
+
+            sp.bind("<Return>", _on_spin_commit)
+            sp.bind("<FocusOut>", lambda _e: _on_spin_commit())
+            sp.focus_set()
+            return
+
     def _select_deck(self, deck: DeckRecord) -> None:
         if deck.id is None:
             return
@@ -1835,41 +2010,76 @@ class InventoryView(ttk.Frame):
             )
         )
 
+        self._destroy_active_cell_editor()
         self.deck_tree.delete(*self.deck_tree.get_children())
         self._deck_item_to_info.clear()
+        self._deck_row_data.clear()
 
         for detail in details_list:
             if detail.status == "exact":
                 status_str = "🟢 Exacta"
                 tag = "owned"
             elif detail.status == "alternative":
-                status_str = "🔵 Alternativa (Mismo Oracle)"
+                status_str = "🔵 Alternativa"
                 tag = "alt_stock"
             elif detail.status == "partial":
-                status_str = f"⚠️ Parcial ({detail.exact_stock + detail.alt_stock}/{detail.quantity_required})"
+                status_str = f"⚠️ Parcial ({detail.physical_quantity}/{detail.quantity_required})"
                 tag = "partial"
             else:
                 status_str = "🔴 Faltante (Proxy)"
                 tag = "missing"
+
+            deck_print_str = detail.set_code.upper() if detail.set_code else "--"
+            coll_num_str = detail.collector_number or "--"
+
+            if detail.available_versions:
+                if detail.physical_quantity == 0 and detail.proxy_quantity > 0:
+                    assigned_ver_str = "Ninguna (Solo Proxy)"
+                elif detail.assigned_version_id is not None:
+                    assigned_v = next((v for v in detail.available_versions if v["card_id"] == detail.assigned_version_id), None)
+                    if assigned_v:
+                        foil_txt = " (Foil)" if assigned_v["is_foil"] else ""
+                        assigned_ver_str = f"{assigned_v['set_code']} #{assigned_v['collector_number']}{foil_txt}"
+                    else:
+                        assigned_ver_str = "Auto (Combinación)"
+                else:
+                    assigned_ver_str = "Auto (Combinación)"
+            else:
+                assigned_ver_str = "Sin stock (Solo Proxy)"
+
+            proxy_check_str = "[x]" if (detail.physical_quantity == 0 and detail.quantity_required > 0) else "[ ]"
 
             item_id = self.deck_tree.insert(
                 "",
                 tk.END,
                 values=(
                     detail.name,
-                    detail.set_code.upper() if detail.set_code else "--",
-                    detail.collector_number or "--",
+                    deck_print_str,
+                    coll_num_str,
                     detail.quantity_required,
-                    detail.exact_stock,
-                    detail.alt_stock,
+                    assigned_ver_str,
+                    detail.physical_quantity,
+                    detail.proxy_quantity,
                     status_str,
+                    proxy_check_str,
                 ),
                 tags=(tag,),
             )
+            self._deck_row_data[item_id] = detail
+
+            # Preview: deck print by default, or assigned version if specified
+            preview_set = detail.set_code
+            preview_num = detail.collector_number
+            if detail.assigned_version_id is not None:
+                match_v = next((v for v in detail.available_versions if v["card_id"] == detail.assigned_version_id), None)
+                if match_v:
+                    preview_set = match_v["set_code"]
+                    preview_num = match_v["collector_number"]
+
             self._deck_item_to_info[item_id] = CardPreviewInfo(
                 name=detail.name,
-                set_code=detail.set_code,
-                collector_number=detail.collector_number,
+                set_code=preview_set,
+                collector_number=preview_num,
             )
 
         total_required = sum(c.quantity_required for c in deck_cards)
@@ -1883,8 +2093,10 @@ class InventoryView(ttk.Frame):
         )
 
     def _clear_deck_details(self) -> None:
+        self._destroy_active_cell_editor()
         self._current_deck_id = None
         self._current_deck_cards = []
+        self._deck_row_data.clear()
         self.deck_tree.delete(*self.deck_tree.get_children())
         self._deck_item_to_info.clear()
         self.lbl_deck_info.configure(text="")

@@ -83,12 +83,42 @@ def init_db(db_path: Path | str | None = None) -> Path:
                 set_code TEXT NOT NULL,
                 collector_number TEXT NOT NULL,
                 quantity_required INTEGER NOT NULL DEFAULT 1,
-                is_proxy BOOLEAN NOT NULL DEFAULT 0
+                is_proxy BOOLEAN NOT NULL DEFAULT 0,
+                physical_quantity INTEGER NOT NULL DEFAULT 0,
+                proxy_quantity INTEGER NOT NULL DEFAULT 0,
+                fulfilled_card_id INTEGER REFERENCES inventory_cards(id) ON DELETE SET NULL
             );
 
             CREATE INDEX IF NOT EXISTS idx_deck_cards_deck_id ON deck_cards(deck_id);
             CREATE INDEX IF NOT EXISTS idx_deck_cards_oracle_id ON deck_cards(oracle_id);
             CREATE INDEX IF NOT EXISTS idx_deck_cards_name ON deck_cards(name);
+            """
+        )
+
+        # Automated schema migration for existing databases
+        cursor = conn.execute("PRAGMA table_info(deck_cards)")
+        existing_cols = {row["name"] for row in cursor.fetchall()}
+
+        if "physical_quantity" not in existing_cols:
+            conn.execute("ALTER TABLE deck_cards ADD COLUMN physical_quantity INTEGER NOT NULL DEFAULT 0")
+        if "proxy_quantity" not in existing_cols:
+            conn.execute("ALTER TABLE deck_cards ADD COLUMN proxy_quantity INTEGER NOT NULL DEFAULT 0")
+        if "fulfilled_card_id" not in existing_cols:
+            conn.execute("ALTER TABLE deck_cards ADD COLUMN fulfilled_card_id INTEGER REFERENCES inventory_cards(id) ON DELETE SET NULL")
+
+        # Backfill existing rows that have default 0 for both physical and proxy
+        conn.execute(
+            """
+            UPDATE deck_cards
+            SET proxy_quantity = quantity_required, physical_quantity = 0
+            WHERE is_proxy = 1 AND physical_quantity = 0 AND proxy_quantity = 0
+            """
+        )
+        conn.execute(
+            """
+            UPDATE deck_cards
+            SET physical_quantity = quantity_required, proxy_quantity = 0
+            WHERE is_proxy = 0 AND physical_quantity = 0 AND proxy_quantity = 0
             """
         )
     return path

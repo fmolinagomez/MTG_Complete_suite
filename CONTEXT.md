@@ -92,6 +92,14 @@ Double-clicking or selecting any card in the collection opens a modal dialog (`C
 ### Deck-to-Inventory Bulk Import (Volcado de Mazo a Inventario)
 A feature allowing the user to import all cards from any registered deck directly into the permanent inventory, tagging them explicitly as either physical copies or proxies.
 
+### Deck Card Versioning & Granular Proxy Allocation (Control de Versiones y Asignación de Proxies)
+Allows users to view all owned prints of a card in their collection, select which specific print fulfills a deck card requirement, or override physical stock to intentionally print proxies:
+- **Available Versions Discovery**: Lists all owned editions (exact and alternative prints) with collector numbers, foil states, and remaining available quantities.
+- **Option Y Preservation**: Retains the imported deck's original set and collector number for proxy printing, linking physical fulfillment via `fulfilled_card_id`.
+- **Granular Physical vs. Proxy Split**: Users can allocate exact quantities of physical cards (`physical_quantity`) and proxies (`proxy_quantity`).
+- **Interactive Table Controls**: In `InventoryView`, users can click the assigned version column for a popup combobox, click the physical quantity cell to spin/type counts, or click the `Proxy?` column to toggle 100% proxy mode on or off.
+- **Stock Reallocation Synergy**: Forcing a card to proxy immediately releases any claimed physical copies back into the inventory pool for other decks.
+
 ### Database Persistence (`inventario.db`)
-Stored in SQLite at `MPCFillToPDF/inventario.db` (co-located with output and cache folders). Uses hybrid relational schema + JSON attributes for maximum query performance and extensible card metadata.
+Stored in SQLite at `MPCFillToPDF/inventario.db` (co-located with output and cache folders). Uses hybrid relational schema + JSON attributes for maximum query performance and extensible card metadata. Includes automated column migrations on startup for `deck_cards.physical_quantity`, `deck_cards.proxy_quantity`, and `deck_cards.fulfilled_card_id`.
 

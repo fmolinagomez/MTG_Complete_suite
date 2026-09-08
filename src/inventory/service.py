@@ -512,7 +512,7 @@ class InventoryService:
             card_rows = conn.execute(
                 """
                 SELECT id, deck_id, oracle_id, name, set_code, collector_number,
-                       quantity_required, is_proxy
+                       quantity_required, is_proxy, physical_quantity, proxy_quantity, fulfilled_card_id
                 FROM deck_cards
                 WHERE deck_id = ?
                 ORDER BY name ASC, set_code ASC
@@ -530,6 +530,9 @@ class InventoryService:
                     collector_number=row["collector_number"],
                     quantity_required=row["quantity_required"],
                     is_proxy=bool(row["is_proxy"]),
+                    physical_quantity=int(row["physical_quantity"] or 0),
+                    proxy_quantity=int(row["proxy_quantity"] or 0),
+                    fulfilled_card_id=row["fulfilled_card_id"],
                 )
                 for row in card_rows
             ]
@@ -577,8 +580,8 @@ class InventoryService:
                     """
                     INSERT INTO deck_cards (
                         deck_id, oracle_id, name, set_code, collector_number,
-                        quantity_required, is_proxy
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        quantity_required, is_proxy, physical_quantity, proxy_quantity, fulfilled_card_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         deck_id,
@@ -588,10 +591,36 @@ class InventoryService:
                         entry.collector_number,
                         entry.quantity_required,
                         1 if entry.is_proxy else 0,
+                        entry.physical_quantity,
+                        entry.proxy_quantity,
+                        entry.fulfilled_card_id,
                     ),
                 )
 
         return deck_id
+
+    def update_deck_card_allocation(
+        self,
+        deck_card_id: int,
+        physical_quantity: int,
+        proxy_quantity: int,
+        fulfilled_card_id: int | None = None,
+    ) -> bool:
+        """Update granular physical vs proxy allocation and fulfilled version for a deck card."""
+        with get_db(self.db_path) as conn:
+            is_proxy = 1 if physical_quantity <= 0 else 0
+            cursor = conn.execute(
+                """
+                UPDATE deck_cards SET
+                    physical_quantity = ?,
+                    proxy_quantity = ?,
+                    fulfilled_card_id = ?,
+                    is_proxy = ?
+                WHERE id = ?
+                """,
+                (physical_quantity, proxy_quantity, fulfilled_card_id, is_proxy, deck_card_id),
+            )
+            return cursor.rowcount > 0
 
     def delete_deck(self, deck_id: int) -> bool:
         """Delete a deck and all its card associations (cascade)."""
@@ -652,7 +681,7 @@ class InventoryService:
                 assigned_rows = conn.execute(
                     f"""
                     SELECT id, deck_id, oracle_id, name, set_code, collector_number,
-                           quantity_required, is_proxy
+                           quantity_required, is_proxy, physical_quantity, proxy_quantity, fulfilled_card_id
                     FROM deck_cards
                     {deck_filter_sql}
                     """,
@@ -668,6 +697,9 @@ class InventoryService:
                         collector_number=r["collector_number"],
                         quantity_required=r["quantity_required"],
                         is_proxy=bool(r["is_proxy"]),
+                        physical_quantity=int(r["physical_quantity"] or 0),
+                        proxy_quantity=int(r["proxy_quantity"] or 0),
+                        fulfilled_card_id=r["fulfilled_card_id"],
                     )
                     for r in assigned_rows
                 ]
@@ -827,7 +859,7 @@ class InventoryService:
             deck_card_rows = conn.execute(
                 """
                 SELECT id, deck_id, oracle_id, name, set_code, collector_number,
-                       quantity_required, is_proxy
+                       quantity_required, is_proxy, physical_quantity, proxy_quantity, fulfilled_card_id
                 FROM deck_cards
                 ORDER BY id ASC
                 """
@@ -843,6 +875,9 @@ class InventoryService:
                 collector_number=dc["collector_number"],
                 quantity_required=dc["quantity_required"],
                 is_proxy=bool(dc["is_proxy"]),
+                physical_quantity=int(dc["physical_quantity"] or 0),
+                proxy_quantity=int(dc["proxy_quantity"] or 0),
+                fulfilled_card_id=dc["fulfilled_card_id"],
             )
             for dc in deck_card_rows
         ]
@@ -943,7 +978,7 @@ class InventoryService:
             assigned_rows = conn.execute(
                 f"""
                 SELECT id, deck_id, oracle_id, name, set_code, collector_number,
-                       quantity_required, is_proxy
+                       quantity_required, is_proxy, physical_quantity, proxy_quantity, fulfilled_card_id
                 FROM deck_cards
                 {deck_filter_sql}
                 ORDER BY id ASC
@@ -960,6 +995,9 @@ class InventoryService:
                     collector_number=r["collector_number"],
                     quantity_required=r["quantity_required"],
                     is_proxy=bool(r["is_proxy"]),
+                    physical_quantity=int(r["physical_quantity"] or 0),
+                    proxy_quantity=int(r["proxy_quantity"] or 0),
+                    fulfilled_card_id=r["fulfilled_card_id"],
                 )
                 for r in assigned_rows
             ]
