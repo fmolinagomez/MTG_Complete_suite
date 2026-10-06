@@ -14,6 +14,7 @@ from src.app_settings import (
     DEFAULT_CUT_LINE_STYLE,
     DEFAULT_CUT_LINE_WIDTH,
 )
+from src.cache_key import crop_cache_path
 from src.cancellation import Cancelled
 from src.constants import JobPdfStartCallback, SpeedCallback, Stage, StageCallback
 from src.cropper import process_for_pdf
@@ -25,7 +26,8 @@ from src.downloader import (
     download_all,
 )
 from src.parser import CardOrder, parse
-from src.pdf_generator import generate
+from src.pdf_generator import MAX_PDF_BYTES, STANDARD_LAYOUT, CardLayout, generate
+from src.print_batch import PrintBatch
 from src.scraper_utils import resources_dir, sanitize_filename
 from src.scryfall import ScryfallError, download_deck_images
 
@@ -70,6 +72,8 @@ class PrintJobSpec:
     cut_line_over_cards: bool = DEFAULT_CUT_LINE_OVER_CARDS
     cut_line_over_fronts: bool = DEFAULT_CUT_LINE_OVER_FRONTS
     cut_line_over_backs: bool = DEFAULT_CUT_LINE_OVER_BACKS
+    layout: CardLayout = STANDARD_LAYOUT
+    max_pdf_bytes: int = MAX_PDF_BYTES
 
     # Cancellation & Progress Callbacks
     cancel_event: Event | None = None
@@ -112,6 +116,7 @@ class _JobData:
     id_name_map: dict[str, str]
     drive_id_context: dict[str, tuple[str, int]]
     xml_needed_ids: dict[str, set[str]]
+    fallback_base_name: str | None = None
 
 
 def _check_cancel(cancel_event: Event | None) -> None:
@@ -124,6 +129,7 @@ def _build_crop_tasks(
     bled_dir: Path,
     local_id_to_path: dict[str, Path],
     crop_map: dict[Path, bool],
+    layout: CardLayout = STANDARD_LAYOUT,
 ) -> list[tuple[str, Path, Path, bool]]:
     """Return (drive_id, raw_path, bled_path, crop_borders) for each image."""
     tasks = []
@@ -131,13 +137,10 @@ def _build_crop_tasks(
         if drive_id in local_id_to_path:
             local_path = local_id_to_path[drive_id]
             crop_borders = crop_map.get(local_path, False)
-            suffix = raw_path.suffix.lower() or ".jpg"
-            tag = "" if crop_borders else "_nocrop"
-            bled_name = f"{drive_id}{tag}{suffix}"
         else:
             crop_borders = True
-            bled_name = raw_path.name
-        tasks.append((drive_id, raw_path, bled_dir / bled_name, crop_borders))
+        bled_path = crop_cache_path(bled_dir, drive_id, raw_path, crop_borders, layout.trim_size_mm)
+        tasks.append((drive_id, raw_path, bled_path, crop_borders))
     return tasks
 
 
@@ -145,6 +148,7 @@ def _run_crop_parallel(
     tasks: list[tuple[str, Path, Path, bool]],
     cancel_event: Event | None,
     on_done: StageCallback = None,
+    layout: CardLayout = STANDARD_LAYOUT,
 ) -> dict[str, Path]:
     """Crop images in parallel using CROP_THREADS workers."""
     total = len(tasks)
@@ -155,7 +159,8 @@ def _run_crop_parallel(
 
     with ThreadPoolExecutor(max_workers=CROP_THREADS) as executor:
         futures = {
-            executor.submit(process_for_pdf, raw, bled, crop): did for did, raw, bled, crop in tasks
+            executor.submit(process_for_pdf, raw, bled, crop, *layout.trim_size_mm): did
+            for did, raw, bled, crop in tasks
         }
         for future in as_completed(futures):
             if cancel_event is not None and cancel_event.is_set():
@@ -247,14 +252,17 @@ def _build_slot_maps(
 def _build_job_data(
     xml_paths: list[Path],
     base_name: str,
-    next_slot: int,
-    extra_fronts: list[Path],
-    extra_backs: list[Path | None],
+    fallback_base_name: str | None = None,
+    next_slot: int = 0,
+    extra_fronts: list[Path] | None = None,
+    extra_backs: list[Path | None] | None = None,
     local_cardback_path: Path | None = None,
 ) -> tuple[_JobData, int]:
     """Parse XMLs and build all slot maps for one job.
     Returns (job_data, updated next_slot). Does not download or crop anything."""
     orders = [parse(p) for p in xml_paths]
+    extra_fronts = extra_fronts or []
+    extra_backs = extra_backs or []
 
     local_id_to_path: dict[str, Path] = {}
     front_slot_to_id, back_slot_to_id, id_name_map, drive_id_context, xml_needed_ids, next_slot = (
@@ -285,6 +293,7 @@ def _build_job_data(
 
     return _JobData(
         base_name=base_name,
+        fallback_base_name=fallback_base_name,
         ordered_slots=sorted(front_slot_to_id.keys()),
         front_slot_to_id=front_slot_to_id,
         back_slot_to_id=back_slot_to_id,
@@ -421,6 +430,7 @@ class PrintPipeline:
             jd, next_slot = _build_job_data(
                 xml_paths=[Path(p) for p in job.xml_paths],
                 base_name=job.base_name,
+                fallback_base_name=getattr(job, "fallback_base_name", None),
                 next_slot=next_slot,
                 extra_fronts=ef,
                 extra_backs=eb,
@@ -458,9 +468,7 @@ class PrintPipeline:
                 return
             for xml_name in _dl_id_to_xml.get(drive_id, []):
                 _xml_done[xml_name] += 1
-                spec.on_xml_download_progress(
-                    xml_name, _xml_done[xml_name], _xml_totals[xml_name]
-                )
+                spec.on_xml_download_progress(xml_name, _xml_done[xml_name], _xml_totals[xml_name])
 
         if progress_callback and download_pairs:
             progress_callback(Stage.DOWNLOAD, 0, len(download_pairs))
@@ -502,7 +510,7 @@ class PrintPipeline:
                 for _did in _xids & _raw_ids_set:
                     _crop_id_to_xml.setdefault(_did, []).append(_xname)
 
-        crop_tasks = _build_crop_tasks(id_to_raw, bled_dir, combined_locals, crop_map)
+        crop_tasks = _build_crop_tasks(id_to_raw, bled_dir, combined_locals, crop_map, spec.layout)
 
         def _on_crop_plan(drive_id: str, done: int, total: int) -> None:
             if progress_callback:
@@ -516,7 +524,9 @@ class PrintPipeline:
 
         if progress_callback and crop_tasks:
             progress_callback(Stage.CROP, 0, len(crop_tasks))
-        id_to_bled = _run_crop_parallel(crop_tasks, spec.cancel_event, on_done=_on_crop_plan)
+        id_to_bled = _run_crop_parallel(
+            crop_tasks, spec.cancel_event, on_done=_on_crop_plan, layout=spec.layout
+        )
 
         _check_cancel(spec.cancel_event)
 
@@ -535,6 +545,7 @@ class PrintPipeline:
                 jd.front_slot_to_id,
                 jd.back_slot_to_id,
                 id_to_bled,
+                max_bytes=spec.max_pdf_bytes,
                 progress_callback=_cb(Stage.PDF),
                 cancel_event=spec.cancel_event,
                 fronts_only=spec.fronts_only,
@@ -544,6 +555,8 @@ class PrintPipeline:
                 cut_line_over_cards=spec.cut_line_over_cards,
                 cut_line_over_fronts=spec.cut_line_over_fronts,
                 cut_line_over_backs=spec.cut_line_over_backs,
+                layout=spec.layout,
+                fallback_base_name=jd.fallback_base_name,
             )
             all_outputs.extend(outputs)
             total_cards += len(jd.ordered_slots)
@@ -684,6 +697,8 @@ def run_locals_only(
     cut_line_over_cards: bool = DEFAULT_CUT_LINE_OVER_CARDS,
     cut_line_over_fronts: bool = DEFAULT_CUT_LINE_OVER_FRONTS,
     cut_line_over_backs: bool = DEFAULT_CUT_LINE_OVER_BACKS,
+    layout: CardLayout = STANDARD_LAYOUT,
+    max_pdf_bytes: int = MAX_PDF_BYTES,
 ) -> list[Path]:
     """Generate PDF(s) only from local images (no XML).
 
@@ -708,8 +723,36 @@ def run_locals_only(
         cut_line_over_cards=cut_line_over_cards,
         cut_line_over_fronts=cut_line_over_fronts,
         cut_line_over_backs=cut_line_over_backs,
+        layout=layout,
+        max_pdf_bytes=max_pdf_bytes,
     )
     return PrintPipeline.execute(spec, progress_callback=progress_callback).pdf_paths
+
+
+def run_print_batch(
+    batch: PrintBatch,
+    output_dir: str | Path,
+    work_dir: str | Path = "workdir",
+    progress_callback: StageCallback = None,
+    cancel_event: Event | None = None,
+    **pdf_options,
+) -> list[Path]:
+    """Render any fully prepared batch through the shared local-image pipeline."""
+    if batch.default_back is None:
+        raise ValueError("El lote imprimible necesita un reverso predeterminado.")
+    return run_locals_only(
+        batch.fronts,
+        batch.default_back,
+        output_dir,
+        batch.name,
+        work_dir,
+        progress_callback,
+        cancel_event=cancel_event,
+        extra_backs=batch.backs,
+        local_crop_map=batch.crop_map,
+        layout=batch.layout or STANDARD_LAYOUT,
+        **pdf_options,
+    )
 
 
 def run_plan(
@@ -732,6 +775,7 @@ def run_plan(
     cut_line_over_cards: bool = DEFAULT_CUT_LINE_OVER_CARDS,
     cut_line_over_fronts: bool = DEFAULT_CUT_LINE_OVER_FRONTS,
     cut_line_over_backs: bool = DEFAULT_CUT_LINE_OVER_BACKS,
+    max_pdf_bytes: int = MAX_PDF_BYTES,
 ) -> list[Path]:
     """Download ALL images first, then crop all, then generate each job's PDFs.
 
@@ -761,6 +805,7 @@ def run_plan(
         cut_line_over_cards=cut_line_over_cards,
         cut_line_over_fronts=cut_line_over_fronts,
         cut_line_over_backs=cut_line_over_backs,
+        max_pdf_bytes=max_pdf_bytes,
     )
     return PrintPipeline.execute(spec, progress_callback=progress_callback).pdf_paths
 

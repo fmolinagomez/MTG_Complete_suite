@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from src.inventory.allocation_engine import StockAllocationEngine
 from src.inventory.db import get_db, init_db
 from src.inventory.models import (
     DeckCardEntry,
@@ -62,7 +61,9 @@ class TestDeckCardsMigration:
             );
             """
         )
-        conn.execute("INSERT INTO decks (id, name, created_at) VALUES (1, 'Legacy Deck', '2026-01-01')")
+        conn.execute(
+            "INSERT INTO decks (id, name, created_at) VALUES (1, 'Legacy Deck', '2026-01-01')"
+        )
         conn.execute(
             """
             INSERT INTO deck_cards (deck_id, oracle_id, name, set_code, collector_number, quantity_required, is_proxy)
@@ -103,7 +104,9 @@ class TestDeckCardsMigration:
 class TestDeckCardVersioningAndAllocation:
     """Test multi-version discovery, selection, and proxy split calculations."""
 
-    def test_available_versions_contains_exact_and_alt_prints(self, service: InventoryService) -> None:
+    def test_available_versions_contains_exact_and_alt_prints(
+        self, service: InventoryService
+    ) -> None:
         # Add 2 different prints of Counterspell to inventory
         c1 = InventoryCard(
             oracle_id="oid-counterspell",
@@ -140,7 +143,9 @@ class TestDeckCardVersioningAndAllocation:
         )
 
         _, deck_cards = service.get_deck_by_id(deck_id)
-        details, exact, alt, missing = service.analyze_deck_card_matches(deck_cards, current_deck_id=deck_id)
+        details, exact, alt, missing = service.analyze_deck_card_matches(
+            deck_cards, current_deck_id=deck_id
+        )
 
         assert len(details) == 1
         detail = details[0]
@@ -179,7 +184,7 @@ class TestDeckCardVersioningAndAllocation:
             quantity=3,
         )
         id_dmr = service.add_or_update_card(c1)
-        id_ice = service.add_or_update_card(c2)
+        service.add_or_update_card(c2)
 
         deck_id = service.register_deck(
             DeckRecord(name="Control Deck"),
@@ -201,7 +206,9 @@ class TestDeckCardVersioningAndAllocation:
         assert dc.fulfilled_card_id == id_dmr
 
         # With fulfilled_card_id = id_dmr (which only has 1 copy), physical = 1, proxy = 1
-        details, exact, alt, missing = service.analyze_deck_card_matches(deck_cards, current_deck_id=deck_id)
+        details, exact, alt, missing = service.analyze_deck_card_matches(
+            deck_cards, current_deck_id=deck_id
+        )
         assert details[0].physical_quantity == 1
         assert details[0].proxy_quantity == 1
         assert details[0].status == "partial"
@@ -273,6 +280,7 @@ class TestDeckViewInteractiveCellEditing:
     @pytest.fixture
     def tk_root(self):
         import tkinter as tk
+
         root = tk.Tk()
         root.withdraw()
         yield root
@@ -291,20 +299,34 @@ class TestDeckViewInteractiveCellEditing:
                 pass
 
     def test_gui_click_proxy_checkbox_toggle(self, clean_root, service: InventoryService) -> None:
-        from src.engine.task_manager import TaskManager
-        from gui.views.inventory_view import InventoryView
         import tkinter as tk
+
+        from gui.views.inventory_view import InventoryView
+        from src.engine.task_manager import TaskManager
 
         tm = TaskManager()
 
         # Add physical card
-        sol_id = service.add_or_update_card(
-            InventoryCard(oracle_id="oid-sol", name="Sol Ring", set_code="c21", collector_number="263", quantity=1)
+        service.add_or_update_card(
+            InventoryCard(
+                oracle_id="oid-sol",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity=1,
+            )
         )
         deck_id = service.register_deck(
             DeckRecord(name="Commander Deck"),
             [
-                DeckCardEntry(deck_id=0, oracle_id="oid-sol", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=1)
+                DeckCardEntry(
+                    deck_id=0,
+                    oracle_id="oid-sol",
+                    name="Sol Ring",
+                    set_code="c21",
+                    collector_number="263",
+                    quantity_required=1,
+                )
             ],
         )
 
@@ -326,7 +348,9 @@ class TestDeckViewInteractiveCellEditing:
         event.x = 10
         event.y = 10
         # Mock identify to target row and column #9
-        view.deck_tree.identify = lambda what, x, y: "cell" if what == "region" else (item_id if what == "row" else "#9")
+        view.deck_tree.identify = lambda what, x, y: (
+            "cell" if what == "region" else (item_id if what == "row" else "#9")
+        )
         view._on_deck_tree_click(event)
 
         # Re-check row after click: should be forced proxy
@@ -345,7 +369,9 @@ class TestDeckViewInteractiveCellEditing:
         assert db_cards[0].is_proxy is True
 
         # Click again to toggle back
-        view.deck_tree.identify = lambda what, x, y: "cell" if what == "region" else (updated_item_id if what == "row" else "#9")
+        view.deck_tree.identify = lambda what, x, y: (
+            "cell" if what == "region" else (updated_item_id if what == "row" else "#9")
+        )
         view._on_deck_tree_click(event)
         restored_rows = view.deck_tree.get_children()
         restored_vals = view.deck_tree.item(restored_rows[0])["values"]
@@ -356,25 +382,47 @@ class TestDeckViewInteractiveCellEditing:
         view.destroy()
         tm.shutdown()
 
-    def test_gui_click_assigned_version_dropdown(self, clean_root, service: InventoryService) -> None:
-        from src.engine.task_manager import TaskManager
-        from gui.views.inventory_view import InventoryView
+    def test_gui_click_assigned_version_dropdown(
+        self, clean_root, service: InventoryService
+    ) -> None:
         import tkinter as tk
+
+        from gui.views.inventory_view import InventoryView
+        from src.engine.task_manager import TaskManager
 
         tm = TaskManager()
 
         # Add 2 prints
         id1 = service.add_or_update_card(
-            InventoryCard(oracle_id="oid-bolt", name="Lightning Bolt", set_code="m11", collector_number="149", quantity=2)
+            InventoryCard(
+                oracle_id="oid-bolt",
+                name="Lightning Bolt",
+                set_code="m11",
+                collector_number="149",
+                quantity=2,
+            )
         )
-        id2 = service.add_or_update_card(
-            InventoryCard(oracle_id="oid-bolt", name="Lightning Bolt", set_code="clb", collector_number="123", quantity=1)
+        service.add_or_update_card(
+            InventoryCard(
+                oracle_id="oid-bolt",
+                name="Lightning Bolt",
+                set_code="clb",
+                collector_number="123",
+                quantity=1,
+            )
         )
 
         deck_id = service.register_deck(
             DeckRecord(name="Burn Deck"),
             [
-                DeckCardEntry(deck_id=0, oracle_id="oid-bolt", name="Lightning Bolt", set_code="2x2", collector_number="117", quantity_required=2)
+                DeckCardEntry(
+                    deck_id=0,
+                    oracle_id="oid-bolt",
+                    name="Lightning Bolt",
+                    set_code="2x2",
+                    collector_number="117",
+                    quantity_required=2,
+                )
             ],
         )
 
@@ -387,7 +435,9 @@ class TestDeckViewInteractiveCellEditing:
 
         # Mock bbox for assigned_version cell
         view.deck_tree.bbox = lambda item, col: (100, 20, 200, 24)
-        view.deck_tree.identify = lambda what, x, y: "cell" if what == "region" else (item_id if what == "row" else "#5")
+        view.deck_tree.identify = lambda what, x, y: (
+            "cell" if what == "region" else (item_id if what == "row" else "#5")
+        )
 
         event = tk.Event()
         event.x = 110
@@ -416,19 +466,33 @@ class TestDeckViewInteractiveCellEditing:
         tm.shutdown()
 
     def test_gui_click_physical_qty_spinbox(self, clean_root, service: InventoryService) -> None:
-        from src.engine.task_manager import TaskManager
-        from gui.views.inventory_view import InventoryView
         import tkinter as tk
+
+        from gui.views.inventory_view import InventoryView
+        from src.engine.task_manager import TaskManager
 
         tm = TaskManager()
 
         service.add_or_update_card(
-            InventoryCard(oracle_id="oid-bolt", name="Lightning Bolt", set_code="m11", collector_number="149", quantity=4)
+            InventoryCard(
+                oracle_id="oid-bolt",
+                name="Lightning Bolt",
+                set_code="m11",
+                collector_number="149",
+                quantity=4,
+            )
         )
         deck_id = service.register_deck(
             DeckRecord(name="Burn Deck"),
             [
-                DeckCardEntry(deck_id=0, oracle_id="oid-bolt", name="Lightning Bolt", set_code="m11", collector_number="149", quantity_required=4)
+                DeckCardEntry(
+                    deck_id=0,
+                    oracle_id="oid-bolt",
+                    name="Lightning Bolt",
+                    set_code="m11",
+                    collector_number="149",
+                    quantity_required=4,
+                )
             ],
         )
 
@@ -441,7 +505,9 @@ class TestDeckViewInteractiveCellEditing:
 
         # Mock bbox for physical_qty cell (#6)
         view.deck_tree.bbox = lambda item, col: (250, 20, 50, 24)
-        view.deck_tree.identify = lambda what, x, y: "cell" if what == "region" else (item_id if what == "row" else "#6")
+        view.deck_tree.identify = lambda what, x, y: (
+            "cell" if what == "region" else (item_id if what == "row" else "#6")
+        )
 
         event = tk.Event()
         event.x = 260
@@ -467,4 +533,3 @@ class TestDeckViewInteractiveCellEditing:
 
         view.destroy()
         tm.shutdown()
-

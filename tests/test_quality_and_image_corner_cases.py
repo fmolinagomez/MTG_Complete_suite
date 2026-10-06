@@ -1,7 +1,8 @@
 """Corner-case test suite for image quality assessment and cropper resilience."""
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 from PIL import Image, ImageDraw
 
 from src.cropper import process_for_pdf
@@ -50,7 +51,9 @@ class TestCorruptAndTruncatedImages:
         assert score == 0.0
         assert dims == (0, 0)
 
-    def test_is_blurry_on_corrupt_files_returns_false_and_zero_without_crashing(self, corrupt_files):
+    def test_is_blurry_on_corrupt_files_returns_false_and_zero_without_crashing(
+        self, corrupt_files
+    ):
         for name, path in corrupt_files.items():
             blurry, score = is_blurry(path, threshold=50.0)
             assert blurry is False
@@ -60,7 +63,11 @@ class TestCorruptAndTruncatedImages:
         for name, path in corrupt_files.items():
             res = analyze_single_image(path)
             assert res["is_ok"] is False
-            assert "Corrupto" in res["integrity"] or "Error" in res["integrity"] or "Dimensiones" in res["integrity"]
+            assert (
+                "Corrupto" in res["integrity"]
+                or "Error" in res["integrity"]
+                or "Dimensiones" in res["integrity"]
+            )
 
 
 class TestUnusualImageColorModes:
@@ -110,7 +117,9 @@ class TestUnusualImageColorModes:
 
     def test_check_image_quality_handles_all_modes_without_crashing(self, mode_images):
         for mode, path in mode_images.items():
-            ok, score, dims = check_image_quality(path, blur_threshold=10.0, check_brightness_contrast=False)
+            ok, score, dims = check_image_quality(
+                path, blur_threshold=10.0, check_brightness_contrast=False
+            )
             assert ok is True, f"Failed for mode {mode}"
             assert score > 10.0
             assert dims == (800, 1120)
@@ -147,7 +156,9 @@ class TestSolidColorZeroVariance:
         assert blurry is True  # 0.0 < 50.0
         assert score == 0.0
 
-        ok, score, dims = check_image_quality(black_path, blur_threshold=0.0, check_brightness_contrast=False)
+        ok, score, dims = check_image_quality(
+            black_path, blur_threshold=0.0, check_brightness_contrast=False
+        )
         assert ok is True
         assert score == 0.0
         assert dims == (800, 1120)
@@ -162,7 +173,9 @@ class TestSolidColorZeroVariance:
         assert blurry is True
         assert score == 0.0
 
-        ok, score, dims = check_image_quality(white_path, blur_threshold=0.0, check_brightness_contrast=False)
+        ok, score, dims = check_image_quality(
+            white_path, blur_threshold=0.0, check_brightness_contrast=False
+        )
         assert ok is True
         assert score == 0.0
         assert dims == (800, 1120)
@@ -232,7 +245,9 @@ class TestQualityMetricsAndThresholdCornerCases:
 
         with patch("cv2.imread", return_value=None):
             # Fallback succeeds via PIL convert
-            ok, score, dims = check_image_quality(path, blur_threshold=10.0, check_brightness_contrast=False)
+            ok, score, dims = check_image_quality(
+                path, blur_threshold=10.0, check_brightness_contrast=False
+            )
             assert ok is True
             assert dims == (900, 1260)
 
@@ -268,7 +283,9 @@ class TestQualityMetricsAndThresholdCornerCases:
         dark_path = tmp_path / "dark.png"
         dark_img.save(dark_path)
 
-        ok_dark, _, _ = check_image_quality(dark_path, blur_threshold=0.0, check_brightness_contrast=True)
+        ok_dark, _, _ = check_image_quality(
+            dark_path, blur_threshold=0.0, check_brightness_contrast=True
+        )
         assert ok_dark is False
 
         res_dark = analyze_single_image(dark_path, check_brightness_contrast=True)
@@ -294,7 +311,9 @@ class TestQualityMetricsAndThresholdCornerCases:
         gray_path = tmp_path / "gray.png"
         gray_img.save(gray_path)
 
-        ok_contrast, _, _ = check_image_quality(gray_path, blur_threshold=0.0, check_brightness_contrast=True)
+        ok_contrast, _, _ = check_image_quality(
+            gray_path, blur_threshold=0.0, check_brightness_contrast=True
+        )
         assert ok_contrast is False
 
         res_contrast = analyze_single_image(gray_path, check_brightness_contrast=True)
@@ -313,4 +332,3 @@ class TestQualityMetricsAndThresholdCornerCases:
             res = analyze_single_image(path)
             assert res["is_ok"] is False
             assert "Error inesperado" in res["integrity"]
-

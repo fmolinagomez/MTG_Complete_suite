@@ -339,7 +339,9 @@ class TestSettingsView:
         assert view.settings.cut_line_width == DEFAULT_CUT_LINE_WIDTH
         assert view.settings.scryfall_lang == DEFAULT_SCRYFALL_LANG
         assert view.settings.scryfall_quality == DEFAULT_SCRYFALL_QUALITY
-        assert view.settings.scryfall_blur_threshold == pytest.approx(DEFAULT_SCRYFALL_BLUR_THRESHOLD)
+        assert view.settings.scryfall_blur_threshold == pytest.approx(
+            DEFAULT_SCRYFALL_BLUR_THRESHOLD
+        )
 
         reloaded = load_settings(tmp_path)
         assert reloaded.cut_line_color == DEFAULT_CUT_LINE_COLOR

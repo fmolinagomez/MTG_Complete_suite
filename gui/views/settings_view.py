@@ -17,6 +17,7 @@ from src.app_settings import (
     DEFAULT_CUT_LINE_OVER_FRONTS,
     DEFAULT_CUT_LINE_STYLE,
     DEFAULT_CUT_LINE_WIDTH,
+    DEFAULT_MAX_PDF_SIZE_MB,
     DEFAULT_SCRYFALL_BC_CHECK,
     DEFAULT_SCRYFALL_BLUR_THRESHOLD,
     DEFAULT_SCRYFALL_DECK_SEPARATORS,
@@ -27,6 +28,8 @@ from src.app_settings import (
     DEFAULT_SCRYFALL_MINIMIZE_TOKENS,
     DEFAULT_SCRYFALL_QUALITY,
     DEFAULT_SCRYFALL_QUALITY_CHECK,
+    MAX_MAX_PDF_SIZE_MB,
+    MIN_MAX_PDF_SIZE_MB,
     AppSettings,
     load_settings,
     save_settings,
@@ -65,9 +68,13 @@ class SettingsView(ttk.Frame):
     def _setup_styles(self) -> None:
         style = ttk.Style(self)
         try:
-            style.configure("SettingsTitle.TLabel", font=("Segoe UI", 16, "bold"), foreground="#1a1a1a")
+            style.configure(
+                "SettingsTitle.TLabel", font=("Segoe UI", 16, "bold"), foreground="#1a1a1a"
+            )
             style.configure("SettingsSub.TLabel", font=("Segoe UI", 9), foreground="#555555")
-            style.configure("SettingsSection.TLabel", font=("Segoe UI", 10, "bold"), foreground="#222222")
+            style.configure(
+                "SettingsSection.TLabel", font=("Segoe UI", 10, "bold"), foreground="#222222"
+            )
             style.configure("SettingsHint.TLabel", font=("Segoe UI", 8), foreground="#777777")
         except Exception as e:
             _log.debug("Could not configure ttk style for SettingsView: %s", e)
@@ -108,9 +115,7 @@ class SettingsView(ttk.Frame):
         dir_section = ttk.LabelFrame(outer, text=" Carpeta de exportación de PDFs ", padding=10)
         dir_section.pack(fill=tk.X, pady=(0, 12))
 
-        self._settings_out_var = tk.StringVar(
-            value=str(self._settings.output_dir or output_dir())
-        )
+        self._settings_out_var = tk.StringVar(value=str(self._settings.output_dir or output_dir()))
         dir_row = ttk.Frame(dir_section)
         dir_row.pack(fill=tk.X)
 
@@ -129,6 +134,34 @@ class SettingsView(ttk.Frame):
             width=12,
         )
         self._dir_btn.pack(side=tk.RIGHT, padx=(8, 0))
+
+        # ── Tamaño máximo de PDF ─────────────────────────────────────────────
+        pdf_size_section = ttk.LabelFrame(outer, text=" Tamaño máximo de PDF ", padding=10)
+        pdf_size_section.pack(fill=tk.X, pady=(0, 12))
+
+        ttk.Label(
+            pdf_size_section,
+            text="(Seteado en 200Mb para que se puedan subir a la web, puedes editarlo para utilizar WeTransfer)",
+            foreground="#555",
+            wraplength=600,
+        ).pack(anchor=tk.W, pady=(0, 6))
+        pdf_size_row = ttk.Frame(pdf_size_section)
+        pdf_size_row.pack(fill=tk.X, pady=(0, 4))
+        ttk.Label(pdf_size_row, text="Máximo por archivo (MB):").pack(side=tk.LEFT)
+        self._settings_max_pdf_size_var = tk.StringVar(value=str(self._settings.max_pdf_size_mb))
+        self._settings_max_pdf_size_var.trace_add(
+            "write", lambda *_: self._save_max_pdf_size_input()
+        )
+        ttk.Entry(
+            pdf_size_row,
+            textvariable=self._settings_max_pdf_size_var,
+            width=6,
+        ).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Label(
+            pdf_size_section,
+            text="Se crea un PDF nuevo al alcanzar este tamaño estimado.",
+            foreground="#555",
+        ).pack(anchor=tk.W)
 
         # ── 2-Column Split: Cut Lines & Scryfall Options ────────────────────
         cols_frame = ttk.Frame(outer)
@@ -298,7 +331,10 @@ class SettingsView(ttk.Frame):
 
         self._scryfall_quality_options = ["Large (Equilibrada)", "PNG (Alta calidad)"]
         self._scryfall_quality_map = {"Large (Equilibrada)": "large", "PNG (Alta calidad)": "png"}
-        self._scryfall_quality_inv_map = {"large": "Large (Equilibrada)", "png": "PNG (Alta calidad)"}
+        self._scryfall_quality_inv_map = {
+            "large": "Large (Equilibrada)",
+            "png": "PNG (Alta calidad)",
+        }
 
         initial_quality_name = self._scryfall_quality_inv_map.get(
             self._settings.scryfall_quality, "Large (Equilibrada)"
@@ -353,7 +389,9 @@ class SettingsView(ttk.Frame):
         # Control de calidad
         qc_row = ttk.Frame(sf_frame)
         qc_row.pack(fill=tk.X, pady=4)
-        self._settings_sf_quality_check_var = tk.BooleanVar(value=self._settings.scryfall_quality_check)
+        self._settings_sf_quality_check_var = tk.BooleanVar(
+            value=self._settings.scryfall_quality_check
+        )
         self._sf_quality_check_cb = ttk.Checkbutton(
             qc_row,
             text="Controlar calidad (evitar borrosas)",
@@ -365,7 +403,9 @@ class SettingsView(ttk.Frame):
         # Controlar brillo y contraste
         bc_row = ttk.Frame(sf_frame)
         bc_row.pack(fill=tk.X, pady=4)
-        self._settings_sf_bc_check_var = tk.BooleanVar(value=self._settings.scryfall_brightness_contrast_check)
+        self._settings_sf_bc_check_var = tk.BooleanVar(
+            value=self._settings.scryfall_brightness_contrast_check
+        )
         self._sf_bc_check_cb = ttk.Checkbutton(
             bc_row,
             text="Controlar brillo y contraste",
@@ -379,7 +419,9 @@ class SettingsView(ttk.Frame):
         blur_row.pack(fill=tk.X, pady=4)
         self._sf_blur_label = ttk.Label(blur_row, text="Umbral de enfoque (blur):")
         self._sf_blur_label.pack(side=tk.LEFT)
-        self._settings_sf_blur_threshold_var = tk.StringVar(value=f"{self._settings.scryfall_blur_threshold}")
+        self._settings_sf_blur_threshold_var = tk.StringVar(
+            value=f"{self._settings.scryfall_blur_threshold}"
+        )
         self._sf_blur_entry = ttk.Entry(
             blur_row,
             textvariable=self._settings_sf_blur_threshold_var,
@@ -393,7 +435,9 @@ class SettingsView(ttk.Frame):
         # Separadores de mazos
         sep_row = ttk.Frame(sf_frame)
         sep_row.pack(fill=tk.X, pady=4)
-        self._settings_sf_deck_separators_var = tk.BooleanVar(value=self._settings.scryfall_deck_separators)
+        self._settings_sf_deck_separators_var = tk.BooleanVar(
+            value=self._settings.scryfall_deck_separators
+        )
         self._sf_deck_separators_cb = ttk.Checkbutton(
             sep_row,
             text="Insertar separadores de mazos",
@@ -405,7 +449,9 @@ class SettingsView(ttk.Frame):
         # Minimizar fichas
         min_tok_row = ttk.Frame(sf_frame)
         min_tok_row.pack(fill=tk.X, pady=4)
-        self._settings_sf_minimize_tokens_var = tk.BooleanVar(value=self._settings.scryfall_minimize_tokens)
+        self._settings_sf_minimize_tokens_var = tk.BooleanVar(
+            value=self._settings.scryfall_minimize_tokens
+        )
         self._sf_minimize_tokens_cb = ttk.Checkbutton(
             min_tok_row,
             text="Minimizar fichas (unificar entre mazos)",
@@ -440,6 +486,17 @@ class SettingsView(ttk.Frame):
 
     def _on_settings_width_changed(self) -> None:
         self._apply_width_from_var()
+
+    def _save_max_pdf_size_input(self) -> None:
+        try:
+            value = int(self._settings_max_pdf_size_var.get())
+        except ValueError:
+            self._settings_max_pdf_size_var.set(str(self._settings.max_pdf_size_mb))
+            return
+        value = max(MIN_MAX_PDF_SIZE_MB, min(MAX_MAX_PDF_SIZE_MB, value))
+        self._settings.max_pdf_size_mb = value
+        self._settings_max_pdf_size_var.set(str(value))
+        self._persist_settings()
 
     def _on_settings_width_trace(self, *_) -> None:
         self._apply_width_from_var()
@@ -558,9 +615,13 @@ class SettingsView(ttk.Frame):
                         shutil.rmtree(item, ignore_errors=True)
                     elif item.is_file():
                         item.unlink(missing_ok=True)
-                messagebox.showinfo("Caché limpiada", "Se ha vaciado correctamente la caché de procesamiento.")
+                messagebox.showinfo(
+                    "Caché limpiada", "Se ha vaciado correctamente la caché de procesamiento."
+                )
             except Exception as exc:
-                messagebox.showwarning("Aviso", f"No se pudieron eliminar todos los archivos de caché: {exc}")
+                messagebox.showwarning(
+                    "Aviso", f"No se pudieron eliminar todos los archivos de caché: {exc}"
+                )
 
     def _settings_reset(self) -> None:
         """Reset all settings to default values and persist."""
@@ -571,6 +632,7 @@ class SettingsView(ttk.Frame):
         self._settings.cut_line_over_cards = DEFAULT_CUT_LINE_OVER_CARDS
         self._settings.cut_line_over_fronts = DEFAULT_CUT_LINE_OVER_FRONTS
         self._settings.cut_line_over_backs = DEFAULT_CUT_LINE_OVER_BACKS
+        self._settings.max_pdf_size_mb = DEFAULT_MAX_PDF_SIZE_MB
 
         self._settings.scryfall_lang = DEFAULT_SCRYFALL_LANG
         self._settings.scryfall_quality = DEFAULT_SCRYFALL_QUALITY
@@ -590,11 +652,18 @@ class SettingsView(ttk.Frame):
         self._settings_width_var.set(f"{DEFAULT_CUT_LINE_WIDTH:.1f}")
         self._settings_over_fronts_var.set(DEFAULT_CUT_LINE_OVER_FRONTS)
         self._settings_over_backs_var.set(DEFAULT_CUT_LINE_OVER_BACKS)
+        self._settings_max_pdf_size_var.set(str(DEFAULT_MAX_PDF_SIZE_MB))
         self._over_cards_sub_frame.pack_forget()
 
-        self._settings_sf_lang_var.set(self._scryfall_lang_inv_map.get(DEFAULT_SCRYFALL_LANG, "Inglés"))
-        self._settings_sf_quality_var.set(self._scryfall_quality_inv_map.get(DEFAULT_SCRYFALL_QUALITY, "Large (Equilibrada)"))
-        self._settings_sf_policy_var.set(self._scryfall_policy_inv_map.get(DEFAULT_SCRYFALL_FAIL_POLICY, "Descargar en inglés"))
+        self._settings_sf_lang_var.set(
+            self._scryfall_lang_inv_map.get(DEFAULT_SCRYFALL_LANG, "Inglés")
+        )
+        self._settings_sf_quality_var.set(
+            self._scryfall_quality_inv_map.get(DEFAULT_SCRYFALL_QUALITY, "Large (Equilibrada)")
+        )
+        self._settings_sf_policy_var.set(
+            self._scryfall_policy_inv_map.get(DEFAULT_SCRYFALL_FAIL_POLICY, "Descargar en inglés")
+        )
         self._update_sf_policy_state()
 
         self._settings_sf_quality_check_var.set(DEFAULT_SCRYFALL_QUALITY_CHECK)

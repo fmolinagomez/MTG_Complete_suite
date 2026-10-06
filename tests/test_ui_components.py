@@ -136,7 +136,9 @@ class TestCardPreviewHover:
             assert p_id.name == "preview_id_abc-123_front.jpg"
 
             # By set_code and collector_number
-            p_set = resolve_preview_cache_path(set_code="MH2", collector_number="450", suffix="back")
+            p_set = resolve_preview_cache_path(
+                set_code="MH2", collector_number="450", suffix="back"
+            )
             assert p_set.name == "preview_mh2_450_back.jpg"
 
             # By name
@@ -149,12 +151,14 @@ class TestCardPreviewHover:
         assert CardPreviewInfo.from_any(info1) is info1
 
         # From dict
-        info2 = CardPreviewInfo.from_any({
-            "name": "Lightning Bolt",
-            "set": "m11",
-            "number": "149",
-            "image_url": "https://example.com/bolt.jpg",
-        })
+        info2 = CardPreviewInfo.from_any(
+            {
+                "name": "Lightning Bolt",
+                "set": "m11",
+                "number": "149",
+                "image_url": "https://example.com/bolt.jpg",
+            }
+        )
         assert info2 is not None
         assert info2.name == "Lightning Bolt"
         assert info2.set_code == "m11"
@@ -260,7 +264,9 @@ class TestCardPreviewHover:
             item1 = tree.insert("", tk.END, values=("Sol Ring", "LEA"))
             tree.insert("", tk.END, values=("Black Lotus", "LEA"))
 
-            resolver = MagicMock(return_value={"name": "Sol Ring", "set_code": "lea", "collector_number": "269"})
+            resolver = MagicMock(
+                return_value={"name": "Sol Ring", "set_code": "lea", "collector_number": "269"}
+            )
             preview.attach_to_treeview(tree, resolver)
 
             # Trigger motion over treeview row

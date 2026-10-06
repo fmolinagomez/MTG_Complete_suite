@@ -86,8 +86,12 @@ class TestGoogleDriveVirusScanWarning:
             b"<a id='uc-download-link' href='/uc?export=download&amp;id=LARGE_ID&amp;confirm=t'>"
             b"Download anyway</a></body></html>"
         )
-        warning_resp = _mock_success_response(data=warning_html, content_type="text/html; charset=utf-8")
-        binary_resp = _mock_success_response(data=b"\xff\xd8\xff\xe0VALID_JPEG_STREAM", content_type="image/jpeg")
+        warning_resp = _mock_success_response(
+            data=warning_html, content_type="text/html; charset=utf-8"
+        )
+        binary_resp = _mock_success_response(
+            data=b"\xff\xd8\xff\xe0VALID_JPEG_STREAM", content_type="image/jpeg"
+        )
 
         calls = []
 

@@ -65,15 +65,13 @@ def test_hover_preview_positioning_normal(clean_root):
         assert hover._tip.winfo_exists()
 
         # Mock geometry calculation
-        with patch.object(hover._tip, "winfo_width", return_value=150), patch.object(
-            hover._tip, "winfo_height", return_value=220
-        ), patch.object(
-            hover._tip, "winfo_screenwidth", return_value=1920
-        ), patch.object(
-            hover._tip, "winfo_screenheight", return_value=1080
-        ), patch.object(
-            hover._tip, "geometry"
-        ) as mock_geom:
+        with (
+            patch.object(hover._tip, "winfo_width", return_value=150),
+            patch.object(hover._tip, "winfo_height", return_value=220),
+            patch.object(hover._tip, "winfo_screenwidth", return_value=1920),
+            patch.object(hover._tip, "winfo_screenheight", return_value=1080),
+            patch.object(hover._tip, "geometry") as mock_geom,
+        ):
             hover._move(100, 100)
             mock_geom.assert_called_with("+118+118")
     finally:
@@ -87,15 +85,13 @@ def test_hover_preview_positioning_right_boundary_overflow(clean_root):
         info = CardPreviewInfo(name="Black Lotus")
         hover.show_preview(info, 1850, 100)
 
-        with patch.object(hover._tip, "winfo_width", return_value=150), patch.object(
-            hover._tip, "winfo_height", return_value=220
-        ), patch.object(
-            hover._tip, "winfo_screenwidth", return_value=1920
-        ), patch.object(
-            hover._tip, "winfo_screenheight", return_value=1080
-        ), patch.object(
-            hover._tip, "geometry"
-        ) as mock_geom:
+        with (
+            patch.object(hover._tip, "winfo_width", return_value=150),
+            patch.object(hover._tip, "winfo_height", return_value=220),
+            patch.object(hover._tip, "winfo_screenwidth", return_value=1920),
+            patch.object(hover._tip, "winfo_screenheight", return_value=1080),
+            patch.object(hover._tip, "geometry") as mock_geom,
+        ):
             # x_root = 1850. 1850 + 18 + 150 = 2018 > 1920
             # Expected x: 1850 - 150 - 12 = 1688
             # Expected y: 100 + 18 = 118
@@ -112,15 +108,13 @@ def test_hover_preview_positioning_bottom_boundary_overflow(clean_root):
         info = CardPreviewInfo(name="Sol Ring")
         hover.show_preview(info, 100, 1000)
 
-        with patch.object(hover._tip, "winfo_width", return_value=150), patch.object(
-            hover._tip, "winfo_height", return_value=220
-        ), patch.object(
-            hover._tip, "winfo_screenwidth", return_value=1920
-        ), patch.object(
-            hover._tip, "winfo_screenheight", return_value=1080
-        ), patch.object(
-            hover._tip, "geometry"
-        ) as mock_geom:
+        with (
+            patch.object(hover._tip, "winfo_width", return_value=150),
+            patch.object(hover._tip, "winfo_height", return_value=220),
+            patch.object(hover._tip, "winfo_screenwidth", return_value=1920),
+            patch.object(hover._tip, "winfo_screenheight", return_value=1080),
+            patch.object(hover._tip, "geometry") as mock_geom,
+        ):
             # y_root = 1000. 1000 + 18 + 220 = 1238 > 1080
             # Expected x: 100 + 18 = 118
             # Expected y: 1000 - 220 - 12 = 768
@@ -137,23 +131,22 @@ def test_hover_preview_positioning_corner_and_clamping(clean_root):
         info = CardPreviewInfo(name="Mox Pearl")
         hover.show_preview(info, 1900, 1050)
 
-        with patch.object(hover._tip, "winfo_width", return_value=150), patch.object(
-            hover._tip, "winfo_height", return_value=220
-        ), patch.object(
-            hover._tip, "winfo_screenwidth", return_value=1920
-        ), patch.object(
-            hover._tip, "winfo_screenheight", return_value=1080
-        ), patch.object(
-            hover._tip, "geometry"
-        ) as mock_geom:
+        with (
+            patch.object(hover._tip, "winfo_width", return_value=150),
+            patch.object(hover._tip, "winfo_height", return_value=220),
+            patch.object(hover._tip, "winfo_screenwidth", return_value=1920),
+            patch.object(hover._tip, "winfo_screenheight", return_value=1080),
+            patch.object(hover._tip, "geometry") as mock_geom,
+        ):
             hover._move(1900, 1050)
             # x: 1900 - 150 - 12 = 1738
             # y: 1050 - 220 - 12 = 818
             mock_geom.assert_called_with("+1738+818")
 
             # Extreme case with tiny screen width (clamping test)
-            with patch.object(hover._tip, "winfo_screenwidth", return_value=100), patch.object(
-                hover._tip, "winfo_screenheight", return_value=100
+            with (
+                patch.object(hover._tip, "winfo_screenwidth", return_value=100),
+                patch.object(hover._tip, "winfo_screenheight", return_value=100),
             ):
                 hover._move(50, 50)
                 # 50 - 150 - 12 = -112 -> clamped to 0
@@ -249,7 +242,9 @@ def test_hover_preview_async_fetch_http_404_shows_error_placeholder(clean_root, 
         with patch("requests.get", return_value=mock_resp):
             cache_path = tmp_path / "cache.jpg"
             # Execute async fetch directly or via executor
-            hover._async_fetch_and_cache(info, "front", cache_path, "mem_key", hover._active_request_id)
+            hover._async_fetch_and_cache(
+                info, "front", cache_path, "mem_key", hover._active_request_id
+            )
 
             clean_root.update_idletasks()
             clean_root.update()
@@ -278,7 +273,9 @@ def test_hover_preview_async_fetch_http_500_shows_error_placeholder(clean_root, 
 
         with patch("requests.get", return_value=mock_resp):
             cache_path = tmp_path / "cache_500.jpg"
-            hover._async_fetch_and_cache(info, "front", cache_path, "mem_500", hover._active_request_id)
+            hover._async_fetch_and_cache(
+                info, "front", cache_path, "mem_500", hover._active_request_id
+            )
 
             clean_root.update_idletasks()
             clean_root.update()
@@ -297,7 +294,9 @@ def test_hover_preview_unresolvable_url_shows_error_placeholder(clean_root, tmp_
 
         cache_path = tmp_path / "cache_unres.jpg"
         with patch.object(hover, "_resolve_download_url", return_value=None):
-            hover._async_fetch_and_cache(info, "front", cache_path, "mem_unres", hover._active_request_id)
+            hover._async_fetch_and_cache(
+                info, "front", cache_path, "mem_unres", hover._active_request_id
+            )
 
             clean_root.update_idletasks()
             clean_root.update()

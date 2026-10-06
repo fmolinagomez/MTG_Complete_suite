@@ -40,12 +40,18 @@ class HubView(ttk.Frame):
     def _setup_styles(self) -> None:
         style = ttk.Style(self)
         try:
-            style.configure("HubBannerTitle.TLabel", font=("Segoe UI", 18, "bold"), foreground="#1a1a1a")
+            style.configure(
+                "HubBannerTitle.TLabel", font=("Segoe UI", 18, "bold"), foreground="#1a1a1a"
+            )
             style.configure("HubBannerSub.TLabel", font=("Segoe UI", 10), foreground="#555555")
-            style.configure("HubCardTitle.TLabel", font=("Segoe UI", 11, "bold"), foreground="#1a1a1a")
+            style.configure(
+                "HubCardTitle.TLabel", font=("Segoe UI", 11, "bold"), foreground="#1a1a1a"
+            )
             style.configure("HubCardDesc.TLabel", font=("Segoe UI", 9), foreground="#666666")
             style.configure("HubAction.TButton", font=("Segoe UI", 9, "bold"), padding=(10, 4))
-            style.configure("HubStatValue.TLabel", font=("Segoe UI", 14, "bold"), foreground="#0066cc")
+            style.configure(
+                "HubStatValue.TLabel", font=("Segoe UI", 14, "bold"), foreground="#0066cc"
+            )
             style.configure("HubStatTitle.TLabel", font=("Segoe UI", 8), foreground="#666666")
         except Exception as e:
             _log.debug("Could not configure ttk style for HubView: %s", e)
@@ -171,7 +177,9 @@ class HubView(ttk.Frame):
         return card
 
     def _build_stats_panel(self, parent: ttk.Frame) -> None:
-        stats_frame = ttk.LabelFrame(parent, text=" 📊 Estado de la Colección e Inventario ", padding=10)
+        stats_frame = ttk.LabelFrame(
+            parent, text=" 📊 Estado de la Colección e Inventario ", padding=10
+        )
         stats_frame.pack(fill=tk.X, pady=(0, 4))
 
         metrics_row = ttk.Frame(stats_frame)

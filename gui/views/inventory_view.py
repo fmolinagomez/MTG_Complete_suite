@@ -12,7 +12,7 @@ from gui.components.card_preview_hover import CardHoverPreview, CardPreviewInfo
 from gui.paths import output_dir, work_dir
 from src.deck_importer import DeckCard, fetch_deck
 from src.engine.task_manager import JobResultEvent, JobStatus, TaskManager
-from src.inventory.models import DeckCardEntry, DeckRecord, InventoryCard
+from src.inventory.models import DeckCardEntry, DeckCardMatchDetail, DeckRecord, InventoryCard
 from src.inventory.service import InventoryService
 from src.pipeline import run_locals_only
 from src.scraper_utils import resources_dir, sanitize_filename
@@ -74,10 +74,14 @@ class CardDecksUsageDialog(tk.Toplevel):
         )
 
         in_decks_count = (
-            self.in_decks if self.in_decks is not None else sum(u["quantity_required"] for u in usages)
+            self.in_decks
+            if self.in_decks is not None
+            else sum(u["quantity_required"] for u in usages)
         )
         avail_count = (
-            self.available if self.available is not None else max(0, self.card.quantity - in_decks_count)
+            self.available
+            if self.available is not None
+            else max(0, self.card.quantity - in_decks_count)
         )
 
         stats_lbl = ttk.Label(
@@ -312,13 +316,19 @@ class AddCardDialog(tk.Toplevel):
         ent_name.focus_set()
 
         ttk.Label(grid, text="Edición (Set):").grid(row=1, column=0, sticky=tk.W, pady=4)
-        ttk.Entry(grid, textvariable=self._set_var, width=12).grid(row=1, column=1, sticky=tk.W, pady=4)
+        ttk.Entry(grid, textvariable=self._set_var, width=12).grid(
+            row=1, column=1, sticky=tk.W, pady=4
+        )
 
         ttk.Label(grid, text="Número:").grid(row=2, column=0, sticky=tk.W, pady=4)
-        ttk.Entry(grid, textvariable=self._num_var, width=12).grid(row=2, column=1, sticky=tk.W, pady=4)
+        ttk.Entry(grid, textvariable=self._num_var, width=12).grid(
+            row=2, column=1, sticky=tk.W, pady=4
+        )
 
         ttk.Label(grid, text="Cantidad:").grid(row=3, column=0, sticky=tk.W, pady=4)
-        ttk.Spinbox(grid, from_=1, to=999, textvariable=self._qty_var, width=8).grid(row=3, column=1, sticky=tk.W, pady=4)
+        ttk.Spinbox(grid, from_=1, to=999, textvariable=self._qty_var, width=8).grid(
+            row=3, column=1, sticky=tk.W, pady=4
+        )
 
         ttk.Label(grid, text="Condición:").grid(row=4, column=0, sticky=tk.W, pady=4)
         cb_cond = ttk.Combobox(
@@ -342,14 +352,18 @@ class AddCardDialog(tk.Toplevel):
 
         chk_frame = ttk.Frame(grid)
         chk_frame.grid(row=6, column=0, columnspan=2, sticky=tk.W, pady=(6, 4))
-        ttk.Checkbutton(chk_frame, text="Foil", variable=self._foil_var).pack(side=tk.LEFT, padx=(0, 14))
+        ttk.Checkbutton(chk_frame, text="Foil", variable=self._foil_var).pack(
+            side=tk.LEFT, padx=(0, 14)
+        )
         ttk.Checkbutton(chk_frame, text="Proxy", variable=self._proxy_var).pack(side=tk.LEFT)
 
         ttk.Separator(container, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=8)
 
         btn_box = ttk.Frame(container)
         btn_box.pack(fill=tk.X)
-        ttk.Button(btn_box, text="Cancelar", command=self._on_cancel).pack(side=tk.RIGHT, padx=(4, 0))
+        ttk.Button(btn_box, text="Cancelar", command=self._on_cancel).pack(
+            side=tk.RIGHT, padx=(4, 0)
+        )
         ttk.Button(btn_box, text="Añadir", command=self._on_accept).pack(side=tk.RIGHT)
 
         self.bind("<Return>", lambda _e: self._on_accept())
@@ -370,7 +384,9 @@ class AddCardDialog(tk.Toplevel):
     def _on_accept(self) -> None:
         name = self._name_var.get().strip()
         if not name:
-            messagebox.showwarning("Campo Requerido", "Introduce el nombre de la carta.", parent=self)
+            messagebox.showwarning(
+                "Campo Requerido", "Introduce el nombre de la carta.", parent=self
+            )
             return
 
         qty = max(1, self._qty_var.get())
@@ -450,7 +466,9 @@ class DeckImportOptionDialog(tk.Toplevel):
 
         btn_box = ttk.Frame(container)
         btn_box.pack(fill=tk.X, pady=(6, 0))
-        ttk.Button(btn_box, text="Cancelar", command=self._on_cancel).pack(side=tk.RIGHT, padx=(4, 0))
+        ttk.Button(btn_box, text="Cancelar", command=self._on_cancel).pack(
+            side=tk.RIGHT, padx=(4, 0)
+        )
         ttk.Button(btn_box, text="Aceptar", command=self._on_accept).pack(side=tk.RIGHT)
 
         self.bind("<Return>", lambda _e: self._on_accept())
@@ -469,7 +487,7 @@ class DeckImportOptionDialog(tk.Toplevel):
         self.geometry(f"{w}x{h}+{x}+{y}")
 
     def _on_accept(self) -> None:
-        self.result = (self._choice_var.get() == "proxy")
+        self.result = self._choice_var.get() == "proxy"
         self.destroy()
 
     def _on_cancel(self) -> None:
@@ -563,7 +581,12 @@ class BatchEditCardsDialog(tk.Toplevel):
         cb_qty_mode = ttk.Combobox(
             grid,
             textvariable=self._qty_mode_var,
-            values=["[Sin cambios]", "Establecer cantidad exacta", "Sumar copias (+)", "Restar copias (-)"],
+            values=[
+                "[Sin cambios]",
+                "Establecer cantidad exacta",
+                "Sumar copias (+)",
+                "Restar copias (-)",
+            ],
             state="readonly",
             width=20,
         )
@@ -576,7 +599,9 @@ class BatchEditCardsDialog(tk.Toplevel):
 
         btn_box = ttk.Frame(container)
         btn_box.pack(fill=tk.X)
-        ttk.Button(btn_box, text="Cancelar", command=self._on_cancel).pack(side=tk.RIGHT, padx=(4, 0))
+        ttk.Button(btn_box, text="Cancelar", command=self._on_cancel).pack(
+            side=tk.RIGHT, padx=(4, 0)
+        )
         ttk.Button(btn_box, text="Aplicar Cambios", command=self._on_accept).pack(side=tk.RIGHT)
 
         self.bind("<Return>", lambda _e: self._on_accept())
@@ -633,7 +658,9 @@ class BatchEditCardsDialog(tk.Toplevel):
             and set_quantity is None
             and quantity_delta is None
         ):
-            messagebox.showinfo("Sin cambios", "No se seleccionó ninguna modificación para aplicar.", parent=self)
+            messagebox.showinfo(
+                "Sin cambios", "No se seleccionó ninguna modificación para aplicar.", parent=self
+            )
             return
 
         self.result = {
@@ -715,8 +742,12 @@ class BatchAssignDeckDialog(tk.Toplevel):
         self.new_deck_frame = ttk.Frame(deck_frame)
         self.new_deck_frame.grid(row=1, column=0, columnspan=2, sticky=tk.EW, pady=(4, 0))
 
-        ttk.Label(self.new_deck_frame, text="Nombre del nuevo mazo:").grid(row=0, column=0, sticky=tk.W, pady=2)
-        self.ent_new_name = ttk.Entry(self.new_deck_frame, textvariable=self._new_name_var, width=28)
+        ttk.Label(self.new_deck_frame, text="Nombre del nuevo mazo:").grid(
+            row=0, column=0, sticky=tk.W, pady=2
+        )
+        self.ent_new_name = ttk.Entry(
+            self.new_deck_frame, textvariable=self._new_name_var, width=28
+        )
         self.ent_new_name.grid(row=0, column=1, sticky=tk.W, padx=6, pady=2)
 
         ttk.Label(self.new_deck_frame, text="Formato:").grid(row=1, column=0, sticky=tk.W, pady=2)
@@ -750,7 +781,9 @@ class BatchAssignDeckDialog(tk.Toplevel):
         ).pack(anchor=tk.W, pady=2)
 
         # Cards summary table preview
-        cards_frame = ttk.LabelFrame(container, text="Resumen de cartas seleccionadas", padding=(6, 4))
+        cards_frame = ttk.LabelFrame(
+            container, text="Resumen de cartas seleccionadas", padding=(6, 4)
+        )
         cards_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
 
         tree = ttk.Treeview(
@@ -791,7 +824,9 @@ class BatchAssignDeckDialog(tk.Toplevel):
 
         btn_box = ttk.Frame(container)
         btn_box.pack(fill=tk.X)
-        ttk.Button(btn_box, text="Cancelar", command=self._on_cancel).pack(side=tk.RIGHT, padx=(4, 0))
+        ttk.Button(btn_box, text="Cancelar", command=self._on_cancel).pack(
+            side=tk.RIGHT, padx=(4, 0)
+        )
         ttk.Button(btn_box, text="Asignar al Mazo", command=self._on_accept).pack(side=tk.RIGHT)
 
         self.bind("<Escape>", lambda _e: self._on_cancel())
@@ -828,7 +863,9 @@ class BatchAssignDeckDialog(tk.Toplevel):
         if sel == "➕ Crear nuevo mazo...":
             new_name = self._new_name_var.get().strip()
             if not new_name:
-                messagebox.showwarning("Campo Requerido", "Introduce el nombre del nuevo mazo.", parent=self)
+                messagebox.showwarning(
+                    "Campo Requerido", "Introduce el nombre del nuevo mazo.", parent=self
+                )
                 return
             new_format = self._new_format_var.get().strip() or "Commander"
         else:
@@ -1027,7 +1064,9 @@ class InventoryView(ttk.Frame):
             width=12,
         )
         self.cb_filter_rarity.pack(side=tk.LEFT, padx=(0, 10))
-        self.cb_filter_rarity.bind("<<ComboboxSelected>>", lambda _: self._filter_collection_table())
+        self.cb_filter_rarity.bind(
+            "<<ComboboxSelected>>", lambda _: self._filter_collection_table()
+        )
 
         btn_reset = ttk.Button(
             self.adv_filters_frame,
@@ -1041,7 +1080,9 @@ class InventoryView(ttk.Frame):
         self.bottom_container.pack(fill=tk.X, side=tk.BOTTOM)
 
         # Contextual Batch Action Bar (docked above stats, visible when 1 or more cards selected)
-        self.batch_bar_frame = ttk.LabelFrame(self.bottom_container, text="⚡ Operaciones en Lote", padding=(6, 4))
+        self.batch_bar_frame = ttk.LabelFrame(
+            self.bottom_container, text="⚡ Operaciones en Lote", padding=(6, 4)
+        )
 
         self.lbl_batch_count = ttk.Label(
             self.batch_bar_frame,
@@ -1120,7 +1161,9 @@ class InventoryView(ttk.Frame):
             "condition",
             "language",
         )
-        self.inv_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", selectmode="extended")
+        self.inv_tree = ttk.Treeview(
+            tree_frame, columns=columns, show="headings", selectmode="extended"
+        )
 
         self._update_inv_column_headings()
 
@@ -1343,7 +1386,9 @@ class InventoryView(ttk.Frame):
     def _open_selected_card_usage_dialog(self) -> None:
         selected = self.inv_tree.selection()
         if not selected:
-            messagebox.showwarning("Aviso", "Selecciona una carta del inventario primero.", parent=self)
+            messagebox.showwarning(
+                "Aviso", "Selecciona una carta del inventario primero.", parent=self
+            )
             return
 
         item_id = selected[0]
@@ -1352,7 +1397,9 @@ class InventoryView(ttk.Frame):
             return
 
         in_decks, available = self._inv_item_to_usage.get(item_id, (0, 0))
-        dlg = CardDecksUsageDialog(self, card, self.inventory_service, in_decks=in_decks, available=available)
+        dlg = CardDecksUsageDialog(
+            self, card, self.inventory_service, in_decks=in_decks, available=available
+        )
         self.wait_window(dlg)
 
     def _on_import_csv_click(self) -> None:
@@ -1577,7 +1624,9 @@ class InventoryView(ttk.Frame):
     def _on_batch_delete_click(self) -> None:
         selected = self.inv_tree.selection()
         if not selected:
-            messagebox.showwarning("Aviso", "Selecciona una o más cartas del inventario para eliminar.", parent=self)
+            messagebox.showwarning(
+                "Aviso", "Selecciona una o más cartas del inventario para eliminar.", parent=self
+            )
             return
 
         cards = [self._inv_item_to_card[i] for i in selected if i in self._inv_item_to_card]
@@ -1628,19 +1677,25 @@ class InventoryView(ttk.Frame):
         self.ent_deck_url = ttk.Entry(url_frame, textvariable=self._deck_url_var)
         self.ent_deck_url.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
 
-        btn_load_deck = ttk.Button(url_frame, text="📥 Cargar Mazo", command=self._on_load_deck_click)
+        btn_load_deck = ttk.Button(
+            url_frame, text="📥 Cargar Mazo", command=self._on_load_deck_click
+        )
         btn_load_deck.pack(side=tk.RIGHT, padx=2)
 
         # Deck selector & header frame
         sel_frame = ttk.Frame(parent, padding=(4, 4))
         sel_frame.pack(fill=tk.X, padx=6, pady=2)
 
-        ttk.Label(sel_frame, text="Mazo Seleccionado:", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=(2, 6))
+        ttk.Label(sel_frame, text="Mazo Seleccionado:", font=("Segoe UI", 9, "bold")).pack(
+            side=tk.LEFT, padx=(2, 6)
+        )
         self.cb_decks = ttk.Combobox(sel_frame, state="readonly", width=28)
         self.cb_decks.pack(side=tk.LEFT, padx=(0, 6))
         self.cb_decks.bind("<<ComboboxSelected>>", self._on_deck_combobox_changed)
 
-        btn_delete_deck = ttk.Button(sel_frame, text="🗑️ Eliminar Mazo", command=self._on_delete_deck_click)
+        btn_delete_deck = ttk.Button(
+            sel_frame, text="🗑️ Eliminar Mazo", command=self._on_delete_deck_click
+        )
         btn_delete_deck.pack(side=tk.LEFT, padx=4)
 
         # Stock evaluation options
@@ -1663,7 +1718,9 @@ class InventoryView(ttk.Frame):
         self.cb_allocate_mode.pack(side=tk.LEFT, padx=(0, 6))
         self.cb_allocate_mode.bind("<<ComboboxSelected>>", self._on_deck_options_changed)
 
-        self.lbl_deck_info = ttk.Label(sel_frame, text="", font=("Segoe UI", 9), foreground="#555555")
+        self.lbl_deck_info = ttk.Label(
+            sel_frame, text="", font=("Segoe UI", 9), foreground="#555555"
+        )
         self.lbl_deck_info.pack(side=tk.LEFT, padx=(6, 0))
 
         # Deck breakdown table
@@ -1681,13 +1738,17 @@ class InventoryView(ttk.Frame):
             "status",
             "is_proxy",
         )
-        self.deck_tree = ttk.Treeview(table_frame, columns=deck_cols, show="headings", selectmode="browse")
+        self.deck_tree = ttk.Treeview(
+            table_frame, columns=deck_cols, show="headings", selectmode="browse"
+        )
 
         self.deck_tree.heading("name", text="Carta", anchor=tk.W)
         self.deck_tree.heading("set_code", text="Edición Mazo", anchor=tk.CENTER)
         self.deck_tree.heading("collector_number", text="Número", anchor=tk.CENTER)
         self.deck_tree.heading("qty_required", text="Req.", anchor=tk.CENTER)
-        self.deck_tree.heading("assigned_version", text="Versión Asignada (Inventario)", anchor=tk.W)
+        self.deck_tree.heading(
+            "assigned_version", text="Versión Asignada (Inventario)", anchor=tk.W
+        )
         self.deck_tree.heading("physical_qty", text="Físicas", anchor=tk.CENTER)
         self.deck_tree.heading("proxy_qty", text="Proxies", anchor=tk.CENTER)
         self.deck_tree.heading("status", text="Estado", anchor=tk.CENTER)
@@ -1756,7 +1817,11 @@ class InventoryView(ttk.Frame):
     def _on_load_deck_click(self) -> None:
         url = self._deck_url_var.get().strip()
         if not url:
-            messagebox.showwarning("Aviso", "Introduce la URL de un mazo (Moxfield, Archidekt, Manabox, etc.).", parent=self)
+            messagebox.showwarning(
+                "Aviso",
+                "Introduce la URL de un mazo (Moxfield, Archidekt, Manabox, etc.).",
+                parent=self,
+            )
             return
 
         job = self.task_manager.submit_job(
@@ -1768,7 +1833,9 @@ class InventoryView(ttk.Frame):
         def _on_deck_loaded(ev: JobResultEvent) -> None:
             if ev.status == JobStatus.COMPLETED:
                 deck_id = ev.result
-                messagebox.showinfo("Mazo Cargado", "El mazo se ha importado y registrado con éxito.", parent=self)
+                messagebox.showinfo(
+                    "Mazo Cargado", "El mazo se ha importado y registrado con éxito.", parent=self
+                )
                 self._deck_url_var.set("")
                 self.refresh_data()
                 self._select_deck_by_id(deck_id)
@@ -1856,7 +1923,11 @@ class InventoryView(ttk.Frame):
                 new_proxy = detail.quantity_required
                 new_fulfilled = detail.assigned_version_id
             else:
-                max_avail = sum(v["quantity_available"] for v in detail.available_versions) if detail.available_versions else detail.exact_stock + detail.alt_stock
+                max_avail = (
+                    sum(v["quantity_available"] for v in detail.available_versions)
+                    if detail.available_versions
+                    else detail.exact_stock + detail.alt_stock
+                )
                 new_phys = min(detail.quantity_required, max_avail)
                 new_proxy = detail.quantity_required - new_phys
                 new_fulfilled = detail.assigned_version_id
@@ -1884,7 +1955,9 @@ class InventoryView(ttk.Frame):
             x, y, w, h = bbox
 
             options = ["Auto: Mejor combinación (Stock disponible)"]
-            option_to_card_id: dict[str, int | None] = {"Auto: Mejor combinación (Stock disponible)": None}
+            option_to_card_id: dict[str, int | None] = {
+                "Auto: Mejor combinación (Stock disponible)": None
+            }
 
             for v in detail.available_versions:
                 lbl = v["label"]
@@ -1901,7 +1974,14 @@ class InventoryView(ttk.Frame):
             if detail.physical_quantity == 0 and detail.proxy_quantity > 0:
                 cb.set("Ninguna (Solo Proxy)")
             elif detail.assigned_version_id is not None:
-                match_lbl = next((v["label"] for v in detail.available_versions if v["card_id"] == detail.assigned_version_id), None)
+                match_lbl = next(
+                    (
+                        v["label"]
+                        for v in detail.available_versions
+                        if v["card_id"] == detail.assigned_version_id
+                    ),
+                    None,
+                )
                 cb.set(match_lbl or options[0])
             else:
                 cb.set(options[0])
@@ -1922,7 +2002,10 @@ class InventoryView(ttk.Frame):
                     new_proxy = detail.quantity_required - new_phys
                 else:
                     new_fulfilled = card_id_target
-                    target_v = next((v for v in detail.available_versions if v["card_id"] == card_id_target), None)
+                    target_v = next(
+                        (v for v in detail.available_versions if v["card_id"] == card_id_target),
+                        None,
+                    )
                     v_avail = target_v["quantity_available"] if target_v else 0
                     new_phys = min(detail.quantity_required, v_avail)
                     new_proxy = detail.quantity_required - new_phys
@@ -1950,7 +2033,11 @@ class InventoryView(ttk.Frame):
                 return
             x, y, w, h = bbox
 
-            max_possible = sum(v["quantity_available"] for v in detail.available_versions) if detail.available_versions else detail.exact_stock + detail.alt_stock
+            max_possible = (
+                sum(v["quantity_available"] for v in detail.available_versions)
+                if detail.available_versions
+                else detail.exact_stock + detail.alt_stock
+            )
             max_limit = min(detail.quantity_required, max_possible)
 
             sp = ttk.Spinbox(self.deck_tree, from_=0, to=max(0, max_limit), width=5)
@@ -2036,10 +2123,19 @@ class InventoryView(ttk.Frame):
                 if detail.physical_quantity == 0 and detail.proxy_quantity > 0:
                     assigned_ver_str = "Ninguna (Solo Proxy)"
                 elif detail.assigned_version_id is not None:
-                    assigned_v = next((v for v in detail.available_versions if v["card_id"] == detail.assigned_version_id), None)
+                    assigned_v = next(
+                        (
+                            v
+                            for v in detail.available_versions
+                            if v["card_id"] == detail.assigned_version_id
+                        ),
+                        None,
+                    )
                     if assigned_v:
                         foil_txt = " (Foil)" if assigned_v["is_foil"] else ""
-                        assigned_ver_str = f"{assigned_v['set_code']} #{assigned_v['collector_number']}{foil_txt}"
+                        assigned_ver_str = (
+                            f"{assigned_v['set_code']} #{assigned_v['collector_number']}{foil_txt}"
+                        )
                     else:
                         assigned_ver_str = "Auto (Combinación)"
                 else:
@@ -2047,7 +2143,9 @@ class InventoryView(ttk.Frame):
             else:
                 assigned_ver_str = "Sin stock (Solo Proxy)"
 
-            proxy_check_str = "[x]" if (detail.physical_quantity == 0 and detail.quantity_required > 0) else "[ ]"
+            proxy_check_str = (
+                "[x]" if (detail.physical_quantity == 0 and detail.quantity_required > 0) else "[ ]"
+            )
 
             item_id = self.deck_tree.insert(
                 "",
@@ -2071,7 +2169,14 @@ class InventoryView(ttk.Frame):
             preview_set = detail.set_code
             preview_num = detail.collector_number
             if detail.assigned_version_id is not None:
-                match_v = next((v for v in detail.available_versions if v["card_id"] == detail.assigned_version_id), None)
+                match_v = next(
+                    (
+                        v
+                        for v in detail.available_versions
+                        if v["card_id"] == detail.assigned_version_id
+                    ),
+                    None,
+                )
                 if match_v:
                     preview_set = match_v["set_code"]
                     preview_num = match_v["collector_number"]
@@ -2100,7 +2205,9 @@ class InventoryView(ttk.Frame):
         self.deck_tree.delete(*self.deck_tree.get_children())
         self._deck_item_to_info.clear()
         self.lbl_deck_info.configure(text="")
-        self.lbl_plan_summary.configure(text="Selecciona un mazo para ver el desglose de stock y proxies.")
+        self.lbl_plan_summary.configure(
+            text="Selecciona un mazo para ver el desglose de stock y proxies."
+        )
 
     def _on_delete_deck_click(self) -> None:
         if self._current_deck_id is None:
@@ -2131,7 +2238,9 @@ class InventoryView(ttk.Frame):
 
         if dlg.result is not None:
             as_proxy = dlg.result
-            count = self.inventory_service.import_deck_cards_to_inventory(self._current_deck_id, as_proxy=as_proxy)
+            count = self.inventory_service.import_deck_cards_to_inventory(
+                self._current_deck_id, as_proxy=as_proxy
+            )
             tipo = "cartas proxy" if as_proxy else "cartas físicas reales"
             messagebox.showinfo(
                 "Volcado Completado",
@@ -2175,7 +2284,11 @@ class InventoryView(ttk.Frame):
         def _on_pdf_completed(ev: JobResultEvent) -> None:
             if ev.status == JobStatus.COMPLETED:
                 result_paths = ev.result
-                paths_str = "\n".join(str(p) for p in result_paths) if isinstance(result_paths, list) else str(result_paths)
+                paths_str = (
+                    "\n".join(str(p) for p in result_paths)
+                    if isinstance(result_paths, list)
+                    else str(result_paths)
+                )
                 messagebox.showinfo(
                     "PDF Generado con Éxito",
                     f"Se ha generado el PDF con las cartas faltantes:\n\n{paths_str}",

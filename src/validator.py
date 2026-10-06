@@ -10,8 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.parser import parse
+from src.precheck import XmlReport
 
 _log = logging.getLogger(__name__)
+
+__all__ = ["ValidationWarning", "validate", "XmlReport"]
 
 
 @dataclass(frozen=True)

@@ -12,16 +12,20 @@ from __future__ import annotations
 import abc
 import html as _html
 import json as _json
+import logging
 import re
 import urllib.parse
 from dataclasses import dataclass, field
 
 import requests
 
+from src.http_client import get as http_get
 from src.scraper_utils import (
     fetch_json,
     fetch_text,
 )
+
+_log = logging.getLogger(__name__)
 
 _HEADERS = {
     "User-Agent": (
@@ -54,6 +58,7 @@ _MANABOX_SIDE_CATS = frozenset({1})  # boardCategory 1 = sideboard
 
 _TAPPEDOUT_MAIN_RE = re.compile(r"^(\d+)\s+(.+)$")
 _TAPPEDOUT_SIDE_RE = re.compile(r"^SB:\s*(\d+)\s+(.+)$")
+_TAPPEDOUT_TOKENS_RE = re.compile(r"\bTokens\s*\|\s*([^\n<]+)", re.IGNORECASE)
 
 # Lorcana Regexes
 _LORCANA_GG_RE = re.compile(r"lorcana\.gg/decks/([^/?#]+)")
@@ -90,6 +95,7 @@ class DeckCard:
     collector_number: str = ""
     quantity: int = 1
     zone: str = "main"  # "main" | "side" | "token" | "commander" | "leader" | "legend" | ...
+    scryfall_id: str = ""
     is_commander: bool = False
     type_line: str = ""
     layout: str = ""
@@ -176,7 +182,17 @@ class MtgDeckAdapter(GameDeckAdapter):
 
     def can_handle_text(self, text: str) -> bool:
         lower = text.lower()
-        if any(marker in lower for marker in ("*cmdr*", "// commander", "// sideboard", "sb:", "commander:", "sideboard:")):
+        if any(
+            marker in lower
+            for marker in (
+                "*cmdr*",
+                "// commander",
+                "// sideboard",
+                "sb:",
+                "commander:",
+                "sideboard:",
+            )
+        ):
             return True
         if re.search(r"^\s*\d+x?\s+[\w\s',/-]+\s+\([A-Za-z0-9]{2,6}\)\s+\w+", text, re.MULTILINE):
             return True
@@ -220,20 +236,26 @@ class MtgDeckAdapter(GameDeckAdapter):
             if lower.startswith(("// name:", "// deck:", "# name:")):
                 deck_name = line.split(":", 1)[1].strip()
                 continue
-            if lower.startswith(("// commander", "commander:", "commanders:")) and not re.match(r"^(?://\s*)?commanders?:\s*\d+", lower):
+            if lower.startswith(("// commander", "commander:", "commanders:")) and not re.match(
+                r"^(?://\s*)?commanders?:\s*\d+", lower
+            ):
                 current_zone = "commander"
                 continue
-            if lower.startswith(("// sideboard", "sideboard:")) or (lower.startswith("sb:") and not re.match(r"^sb:\s*\d+", lower)):
+            if lower.startswith(("// sideboard", "sideboard:")) or (
+                lower.startswith("sb:") and not re.match(r"^sb:\s*\d+", lower)
+            ):
                 current_zone = "side"
                 continue
-            if lower.startswith(("// main", "mainboard:", "// deck", "deck:")) and not re.match(r"^(?://\s*)?(?:main|mainboard|deck):\s*\d+", lower):
+            if lower.startswith(("// main", "mainboard:", "// deck", "deck:")) and not re.match(
+                r"^(?://\s*)?(?:main|mainboard|deck):\s*\d+", lower
+            ):
                 current_zone = "main"
                 continue
             if line.startswith("//"):
                 continue
 
             zone = current_zone
-            is_commander = (zone == "commander")
+            is_commander = zone == "commander"
             if "*cmdr*" in lower:
                 is_commander = True
                 zone = "main"
@@ -313,7 +335,9 @@ class LorcanaDeckAdapter(GameDeckAdapter):
 
     def can_handle_url(self, url: str) -> bool:
         host = urllib.parse.urlparse(url).netloc.lower()
-        return any(d in host for d in ("lorcana.gg", "inkdecks.com", "dreamborn.ink", "inktable.net"))
+        return any(
+            d in host for d in ("lorcana.gg", "inkdecks.com", "dreamborn.ink", "inktable.net")
+        )
 
     def can_handle_text(self, text: str) -> bool:
         lower = text.lower()
@@ -530,7 +554,9 @@ class RiftboundDeckAdapter(GameDeckAdapter):
                 source="rb_scraper",
             )
         except Exception as exc:
-            raise DeckImportError(f"Error al importar mazo de Riftbound: {exc}", "riftbound") from exc
+            raise DeckImportError(
+                f"Error al importar mazo de Riftbound: {exc}", "riftbound"
+            ) from exc
 
     def parse_deck_list(self, text: str) -> FetchedDeck:
         cards: list[DeckCard] = []
@@ -637,13 +663,36 @@ def detect_game(url_or_text: str) -> str:
             return adapter.game_name
     else:
         lower = trimmed.lower()
-        if "riftbound" in lower or "piltover" in lower or any(k in lower for k in ("legend:", "battlefield:", "rune:")):
+        if (
+            "riftbound" in lower
+            or "piltover" in lower
+            or any(k in lower for k in ("legend:", "battlefield:", "rune:"))
+        ):
             return "riftbound"
-        if "one piece" in lower or "optcg" in lower or re.search(r"\b(?:OP|ST|EB|PRB)\d{2}-\d{3}\b", trimmed, re.IGNORECASE):
+        if (
+            "one piece" in lower
+            or "optcg" in lower
+            or re.search(r"\b(?:OP|ST|EB|PRB)\d{2}-\d{3}\b", trimmed, re.IGNORECASE)
+        ):
             return "onepiece"
-        if "lorcana" in lower or "dreamborn" in lower or "inkdecks" in lower or re.search(r"^\s*\d+x?\s+[A-Za-z\s',/]+\s+-\s+[A-Za-z\s',/]+", trimmed, re.MULTILINE):
+        if (
+            "lorcana" in lower
+            or "dreamborn" in lower
+            or "inkdecks" in lower
+            or re.search(r"^\s*\d+x?\s+[A-Za-z\s',/]+\s+-\s+[A-Za-z\s',/]+", trimmed, re.MULTILINE)
+        ):
             return "lorcana"
-        if any(marker in lower for marker in ("*cmdr*", "// commander", "// sideboard", "sb:", "commander:", "sideboard:")):
+        if any(
+            marker in lower
+            for marker in (
+                "*cmdr*",
+                "// commander",
+                "// sideboard",
+                "sb:",
+                "commander:",
+                "sideboard:",
+            )
+        ):
             return "mtg"
         adapter = _REGISTRY.get_for_text(trimmed)
         if adapter:
@@ -707,7 +756,7 @@ def fetch_deck(url: str, game: str | None = None) -> FetchedDeck:
 def _fetch_moxfield(deck_id: str) -> FetchedDeck:
     url = _MOXFIELD_API.format(deck_id=deck_id)
     try:
-        resp = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
+        resp = http_get(url, headers=_HEADERS, timeout=_TIMEOUT)
         resp.raise_for_status()
         data = resp.json()
     except requests.RequestException as exc:
@@ -733,7 +782,7 @@ def _fetch_moxfield(deck_id: str) -> FetchedDeck:
             type_line = card.get("type_line", "")
             if not set_code or not collector_number:
                 continue
-            is_commander = (board_name == "commanders")
+            is_commander = board_name == "commanders"
             cards.append(
                 DeckCard(
                     name,
@@ -747,24 +796,21 @@ def _fetch_moxfield(deck_id: str) -> FetchedDeck:
                 )
             )
 
-    # Parse tokens from Moxfield JSON response
-    for token_card in data.get("tokens", []):
-        set_code = str(token_card.get("set", "")).lower()
-        collector_number = str(token_card.get("cn", ""))
-        name = token_card.get("name", "")
-        qty = int(token_card.get("quantity") or 1)
-        type_line = token_card.get("type_line", "") or "Token"
-        if not set_code or not collector_number:
-            continue
-        cards.append(DeckCard(name, set_code, collector_number, qty, "token", type_line=type_line, game="mtg"))
-
-    return FetchedDeck(name=deck_name, cards=cards, format=deck_format, raw_json=data, game="mtg", source="moxfield")
+    cards.extend(_extract_token_cards(data.get("tokens", [])))
+    return FetchedDeck(
+        name=deck_name,
+        cards=cards,
+        format=deck_format,
+        raw_json=data,
+        game="mtg",
+        source="moxfield",
+    )
 
 
 def _fetch_archidekt(deck_id: str) -> FetchedDeck:
     url = _ARCHIDEKT_API.format(deck_id=deck_id)
     try:
-        resp = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
+        resp = http_get(url, headers=_HEADERS, timeout=_TIMEOUT)
         resp.raise_for_status()
         data = resp.json()
     except requests.RequestException as exc:
@@ -773,6 +819,7 @@ def _fetch_archidekt(deck_id: str) -> FetchedDeck:
     deck_name: str = data.get("name", "")
     deck_format: str = data.get("deckFormat", "commander")
     cards: list[DeckCard] = []
+    token_source_ids: list[str] = []
     for entry in data.get("cards", []):
         categories = entry.get("categories", [])
         if any(c in _ARCHIDEKT_SKIP_CATEGORIES for c in categories):
@@ -792,9 +839,11 @@ def _fetch_archidekt(deck_id: str) -> FetchedDeck:
             if isinstance(types_list, list):
                 type_line = " ".join(types_list)
 
-        if not set_code or not collector_number:
-            continue
         is_commander = "Commander" in categories
+        if not name:
+            continue
+        if not is_commander and (not set_code or not collector_number):
+            continue
         cards.append(
             DeckCard(
                 name,
@@ -807,13 +856,27 @@ def _fetch_archidekt(deck_id: str) -> FetchedDeck:
                 game="mtg",
             )
         )
-    return FetchedDeck(name=deck_name, cards=cards, format=deck_format, raw_json=data, game="mtg", source="archidekt")
+        if card_data.get("oracleCard", {}).get("tokens"):
+            token_source_ids.append(str(card_data.get("uid", "")))
+    cards.extend(_extract_token_cards(data.get("tokens", [])))
+    if token_source_ids:
+        from src.scryfall import fetch_related_tokens
+
+        cards.extend(fetch_related_tokens(token_source_ids))
+    return FetchedDeck(
+        name=deck_name,
+        cards=cards,
+        format=deck_format,
+        raw_json=data,
+        game="mtg",
+        source="archidekt",
+    )
 
 
 def _fetch_deckstats(owner_id: str, deck_id: str) -> FetchedDeck:
     url = _DECKSTATS_API.format(owner_id=owner_id, deck_id=deck_id)
     try:
-        resp = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
+        resp = http_get(url, headers=_HEADERS, timeout=_TIMEOUT)
         resp.raise_for_status()
         data = resp.json()
     except requests.RequestException as exc:
@@ -840,7 +903,7 @@ def _fetch_deckstats(owner_id: str, deck_id: str) -> FetchedDeck:
 def _fetch_tappedout(slug: str) -> FetchedDeck:
     url = _TAPPEDOUT_API.format(slug=slug)
     try:
-        resp = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
+        resp = http_get(url, headers=_HEADERS, timeout=_TIMEOUT)
         resp.raise_for_status()
     except requests.RequestException as exc:
         raise DeckImportError(f"Error al acceder a TappedOut: {exc}", "tappedout") from exc
@@ -856,14 +919,35 @@ def _fetch_tappedout(slug: str) -> FetchedDeck:
             line = line.replace("*CMDR*", "").strip()
         m = _TAPPEDOUT_SIDE_RE.match(line)
         if m:
-            cards.append(DeckCard(m.group(2).strip(), "", "", int(m.group(1)), "side", is_commander=is_commander, game="mtg"))
+            cards.append(
+                DeckCard(
+                    m.group(2).strip(),
+                    "",
+                    "",
+                    int(m.group(1)),
+                    "side",
+                    is_commander=is_commander,
+                    game="mtg",
+                )
+            )
             continue
         m = _TAPPEDOUT_MAIN_RE.match(line)
         if m:
-            cards.append(DeckCard(m.group(2).strip(), "", "", int(m.group(1)), "main", is_commander=is_commander, game="mtg"))
+            cards.append(
+                DeckCard(
+                    m.group(2).strip(),
+                    "",
+                    "",
+                    int(m.group(1)),
+                    "main",
+                    is_commander=is_commander,
+                    game="mtg",
+                )
+            )
 
     if not cards:
         raise DeckImportError("No se encontraron cartas en el mazo de TappedOut", "tappedout")
+    cards.extend(_fetch_tappedout_tokens(slug))
     return FetchedDeck(name=deck_name, cards=cards, game="mtg", source="tappedout")
 
 
@@ -889,7 +973,9 @@ def _fetch_scryfall(deck_id: str) -> FetchedDeck:
                 digest = item.get("card_digest", {})
                 name = digest.get("name", item.get("name", ""))
                 set_code = str(digest.get("set", item.get("set", ""))).lower()
-                collector_num = str(digest.get("collector_number", item.get("collector_number", "")))
+                collector_num = str(
+                    digest.get("collector_number", item.get("collector_number", ""))
+                )
                 qty = int(item.get("count", 1))
                 type_line = digest.get("type_line", "")
                 if name:
@@ -925,10 +1011,84 @@ def _fetch_scryfall(deck_id: str) -> FetchedDeck:
                     )
                 )
 
-    return FetchedDeck(name=deck_name, cards=cards, format=deck_format, raw_json=data, game="mtg", source="scryfall")
+    return FetchedDeck(
+        name=deck_name,
+        cards=cards,
+        format=deck_format,
+        raw_json=data,
+        game="mtg",
+        source="scryfall",
+    )
 
 
-# ── Astro Dehydrated Props Helpers (Manabox) ─────────────────────────────────
+def _extract_token_cards(raw_tokens: object) -> list[DeckCard]:
+    """Return one printable card for each distinct token supplied by a deck API."""
+    if isinstance(raw_tokens, dict):
+        entries = raw_tokens.values()
+    elif isinstance(raw_tokens, list):
+        entries = raw_tokens
+    else:
+        return []
+
+    cards: list[DeckCard] = []
+    seen: set[tuple[str, str, str]] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        card = entry.get("card", entry)
+        if not isinstance(card, dict):
+            continue
+        oracle_card = card.get("oracleCard", {})
+        name = str(card.get("name", oracle_card.get("name", "")))
+        edition = card.get("edition", {})
+        set_code = str(card.get("set", card.get("setCode", edition.get("editioncode", "")))).lower()
+        collector_number = str(
+            card.get("cn", card.get("collectorNumber", card.get("collector_number", "")))
+        )
+        type_line = str(card.get("type_line", oracle_card.get("type", ""))) or "Token"
+        layout = str(card.get("layout", ""))
+        qty = int(card.get("quantity") or entry.get("quantity") or 1)
+        if not set_code or not collector_number:
+            continue
+        key = (name.casefold(), set_code, collector_number)
+        if name and key not in seen:
+            seen.add(key)
+            cards.append(
+                DeckCard(
+                    name,
+                    set_code,
+                    collector_number,
+                    qty,
+                    "token",
+                    type_line=type_line,
+                    layout=layout,
+                )
+            )
+    return cards
+
+
+def _fetch_tappedout_tokens(slug: str) -> list[DeckCard]:
+    """Read TappedOut's generated-token summary without failing the deck import."""
+    try:
+        resp = http_get(
+            f"https://tappedout.net/mtg-decks/{slug}/", headers=_HEADERS, timeout=_TIMEOUT
+        )
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        _log.warning("No se pudieron leer los tokens de TappedOut: %s", exc)
+        return []
+
+    text = _html.unescape(resp.text)
+    match = _TAPPEDOUT_TOKENS_RE.search(text)
+    if not match:
+        return []
+    names = (name.strip() for name in match.group(1).split(","))
+    return [DeckCard(_tappedout_token_name(name), "", "", 1, "token") for name in names if name]
+
+
+def _tappedout_token_name(label: str) -> str:
+    """Remove TappedOut's power/toughness/color suffix before Scryfall name lookup."""
+    return re.sub(r"\s+\d+/\d+\s+[WUBRGC]+$", "", label).strip()
 
 
 def _astro_val(wrapped: object) -> object:
@@ -982,7 +1142,7 @@ def _manabox_extract_props(raw: str) -> str:
 def _fetch_manabox(deck_id: str) -> FetchedDeck:
     url = f"https://manabox.app/decks/{deck_id}"
     try:
-        resp = requests.get(url, headers=_HEADERS, timeout=_TIMEOUT)
+        resp = http_get(url, headers=_HEADERS, timeout=_TIMEOUT)
         resp.raise_for_status()
     except requests.RequestException as exc:
         raise DeckImportError(f"Error al acceder a Manabox: {exc}", "manabox") from exc
@@ -1014,7 +1174,11 @@ def _fetch_manabox(deck_id: str) -> FetchedDeck:
         type_line = str(_astro_val(entry.get("typeLine", ""))) or ""
         if not name:
             continue
-        cards.append(DeckCard(name, set_code, collector_number, quantity, zone, type_line=type_line, game="mtg"))
+        cards.append(
+            DeckCard(
+                name, set_code, collector_number, quantity, zone, type_line=type_line, game="mtg"
+            )
+        )
 
     return FetchedDeck(name=deck_name, cards=cards, game="mtg", source="manabox")
 
@@ -1030,22 +1194,44 @@ def _fetch_lorcana_gg(slug: str) -> FetchedDeck:
     url = slug if slug.startswith("http") else f"https://lorcana.gg/decks/{slug}/"
     deck = lorcana_scraper.scrape_deck(url)
     cards = [
-        DeckCard(name=c.name, collector_number=c.card_id, quantity=c.quantity, zone="main", image_url=c.image_url, game="lorcana")
+        DeckCard(
+            name=c.name,
+            collector_number=c.card_id,
+            quantity=c.quantity,
+            zone="main",
+            image_url=c.image_url,
+            game="lorcana",
+        )
         for c in deck.cards
     ]
-    return FetchedDeck(name=deck.name, cards=cards, format="standard", game="lorcana", source="lorcana_gg")
+    return FetchedDeck(
+        name=deck.name, cards=cards, format="standard", game="lorcana", source="lorcana_gg"
+    )
 
 
 def _fetch_inkdecks(deck_id: str) -> FetchedDeck:
     from src import lorcana_scraper
 
-    url = deck_id if deck_id.startswith("http") else f"https://inkdecks.com/lorcana-metagame/deck-{deck_id}"
+    url = (
+        deck_id
+        if deck_id.startswith("http")
+        else f"https://inkdecks.com/lorcana-metagame/deck-{deck_id}"
+    )
     deck = lorcana_scraper.scrape_deck(url)
     cards = [
-        DeckCard(name=c.name, collector_number=c.card_id, quantity=c.quantity, zone="main", image_url=c.image_url, game="lorcana")
+        DeckCard(
+            name=c.name,
+            collector_number=c.card_id,
+            quantity=c.quantity,
+            zone="main",
+            image_url=c.image_url,
+            game="lorcana",
+        )
         for c in deck.cards
     ]
-    return FetchedDeck(name=deck.name, cards=cards, format="standard", game="lorcana", source="inkdecks")
+    return FetchedDeck(
+        name=deck.name, cards=cards, format="standard", game="lorcana", source="inkdecks"
+    )
 
 
 def _fetch_dreamborn(deck_id: str) -> FetchedDeck:
@@ -1064,13 +1250,24 @@ def _fetch_dreamborn(deck_id: str) -> FetchedDeck:
                     game="lorcana",
                 )
             )
-        return FetchedDeck(name=name, cards=cards, format="standard", raw_json=data, game="lorcana", source="dreamborn")
+        return FetchedDeck(
+            name=name,
+            cards=cards,
+            format="standard",
+            raw_json=data,
+            game="lorcana",
+            source="dreamborn",
+        )
     except Exception as exc:
         raise DeckImportError(f"Error al acceder a Dreamborn: {exc}", "dreamborn") from exc
 
 
 def _fetch_inktable(deck_id: str) -> FetchedDeck:
-    url = deck_id if deck_id.startswith("http") else f"https://inktable.net/api/lorcana/decks/{deck_id}"
+    url = (
+        deck_id
+        if deck_id.startswith("http")
+        else f"https://inktable.net/api/lorcana/decks/{deck_id}"
+    )
     try:
         data = fetch_json(url, headers=_HEADERS, timeout=_TIMEOUT)
         name = data.get("name", "Inktable Deck")
@@ -1085,7 +1282,14 @@ def _fetch_inktable(deck_id: str) -> FetchedDeck:
                     game="lorcana",
                 )
             )
-        return FetchedDeck(name=name, cards=cards, format="standard", raw_json=data, game="lorcana", source="inktable")
+        return FetchedDeck(
+            name=name,
+            cards=cards,
+            format="standard",
+            raw_json=data,
+            game="lorcana",
+            source="inktable",
+        )
     except Exception as exc:
         raise DeckImportError(f"Error al acceder a Inktable: {exc}", "inktable") from exc
 
@@ -1106,7 +1310,9 @@ def _fetch_onepiece_gg(slug: str) -> FetchedDeck:
         )
         for c in deck.cards
     ]
-    return FetchedDeck(name=deck.name, cards=cards, format="standard", game="onepiece", source="onepiece_gg")
+    return FetchedDeck(
+        name=deck.name, cards=cards, format="standard", game="onepiece", source="onepiece_gg"
+    )
 
 
 def _fetch_egman_op(url: str) -> FetchedDeck:
@@ -1124,7 +1330,9 @@ def _fetch_egman_op(url: str) -> FetchedDeck:
         )
         for c in deck.cards
     ]
-    return FetchedDeck(name=deck.name, cards=cards, format="standard", game="onepiece", source="egman")
+    return FetchedDeck(
+        name=deck.name, cards=cards, format="standard", game="onepiece", source="egman"
+    )
 
 
 def _fetch_kaizoku_op(url: str) -> FetchedDeck:
@@ -1142,7 +1350,9 @@ def _fetch_kaizoku_op(url: str) -> FetchedDeck:
         )
         for c in deck.cards
     ]
-    return FetchedDeck(name=deck.name, cards=cards, format="standard", game="onepiece", source="kaizoku")
+    return FetchedDeck(
+        name=deck.name, cards=cards, format="standard", game="onepiece", source="kaizoku"
+    )
 
 
 def _fetch_optopdecks(slug: str) -> FetchedDeck:
@@ -1162,9 +1372,13 @@ def _fetch_optopdecks(slug: str) -> FetchedDeck:
             DeckCard(name=cid, collector_number=cid, quantity=cnt, zone="main", game="onepiece")
             for cid, cnt in card_counts.items()
         ]
-        return FetchedDeck(name=name, cards=cards, format="standard", game="onepiece", source="onepiecetopdecks")
+        return FetchedDeck(
+            name=name, cards=cards, format="standard", game="onepiece", source="onepiecetopdecks"
+        )
     except Exception as exc:
-        raise DeckImportError(f"Error al acceder a OnePieceTopDecks: {exc}", "onepiecetopdecks") from exc
+        raise DeckImportError(
+            f"Error al acceder a OnePieceTopDecks: {exc}", "onepiecetopdecks"
+        ) from exc
 
 
 def _fetch_gumgum(deck_id: str) -> FetchedDeck:
@@ -1185,13 +1399,22 @@ def _fetch_gumgum(deck_id: str) -> FetchedDeck:
                     game="onepiece",
                 )
             )
-        return FetchedDeck(name=name, cards=cards, format="standard", raw_json=data, game="onepiece", source="gumgum")
+        return FetchedDeck(
+            name=name,
+            cards=cards,
+            format="standard",
+            raw_json=data,
+            game="onepiece",
+            source="gumgum",
+        )
     except Exception as exc:
         raise DeckImportError(f"Error al acceder a GumGum: {exc}", "gumgum") from exc
 
 
 def _fetch_limitless_op(deck_id: str) -> FetchedDeck:
-    url = deck_id if deck_id.startswith("http") else f"https://play.limitlesstcg.com/decks/{deck_id}"
+    url = (
+        deck_id if deck_id.startswith("http") else f"https://play.limitlesstcg.com/decks/{deck_id}"
+    )
     try:
         html_text = fetch_text(url, headers=_HEADERS, timeout=_TIMEOUT)
         name = "Limitless Deck"
@@ -1207,6 +1430,8 @@ def _fetch_limitless_op(deck_id: str) -> FetchedDeck:
             DeckCard(name=cid, collector_number=cid, quantity=cnt, zone="main", game="onepiece")
             for cid, cnt in card_counts.items()
         ]
-        return FetchedDeck(name=name, cards=cards, format="standard", game="onepiece", source="limitless")
+        return FetchedDeck(
+            name=name, cards=cards, format="standard", game="onepiece", source="limitless"
+        )
     except Exception as exc:
         raise DeckImportError(f"Error al acceder a Limitless: {exc}", "limitless") from exc

@@ -82,15 +82,21 @@ class TestManaBoxCSV:
 
         with get_db(db_file) as conn:
             # Physical old card should be wiped, proxy preserved
-            old_card = conn.execute("SELECT * FROM inventory_cards WHERE name = 'Old Physical Card'").fetchone()
+            old_card = conn.execute(
+                "SELECT * FROM inventory_cards WHERE name = 'Old Physical Card'"
+            ).fetchone()
             assert old_card is None
 
-            proxy_card = conn.execute("SELECT * FROM inventory_cards WHERE name = 'Proxy Card'").fetchone()
+            proxy_card = conn.execute(
+                "SELECT * FROM inventory_cards WHERE name = 'Proxy Card'"
+            ).fetchone()
             assert proxy_card is not None
             assert proxy_card["is_proxy"] == 1
 
             # New cards exist
-            sol_ring = conn.execute("SELECT * FROM inventory_cards WHERE name = 'Sol Ring'").fetchone()
+            sol_ring = conn.execute(
+                "SELECT * FROM inventory_cards WHERE name = 'Sol Ring'"
+            ).fetchone()
             assert sol_ring is not None
             assert sol_ring["quantity"] == 2
 
@@ -119,12 +125,16 @@ class TestManaBoxCSV:
 
         with get_db(db_file) as conn:
             # Sol Ring should be updated to CSV quantity (2)
-            sol_ring = conn.execute("SELECT * FROM inventory_cards WHERE name = 'Sol Ring'").fetchone()
+            sol_ring = conn.execute(
+                "SELECT * FROM inventory_cards WHERE name = 'Sol Ring'"
+            ).fetchone()
             assert sol_ring is not None
             assert sol_ring["quantity"] == 2
 
             # Llanowar Elves should remain intact
-            elves = conn.execute("SELECT * FROM inventory_cards WHERE name = 'Llanowar Elves'").fetchone()
+            elves = conn.execute(
+                "SELECT * FROM inventory_cards WHERE name = 'Llanowar Elves'"
+            ).fetchone()
             assert elves is not None
             assert elves["quantity"] == 4
 
@@ -145,7 +155,9 @@ class TestManaBoxCSV:
     def test_parse_csv_encoding_fallback(self, tmp_path: Path):
         csv_file = tmp_path / "manabox_latin1.csv"
         # Write bytes that fail utf-8 decoding
-        latin1_content = "Name,Set code,Collector number,Quantity\nLórien Revealed,ltr,180,1\n".encode("latin-1")
+        latin1_content = (
+            "Name,Set code,Collector number,Quantity\nLórien Revealed,ltr,180,1\n".encode("latin-1")
+        )
         csv_file.write_bytes(latin1_content)
 
         cards = parse_manabox_csv(csv_file)
@@ -184,4 +196,3 @@ Lightning Bolt,m11,149,0,false,false
             assert len(phys) == 0
             prox = conn.execute("SELECT * FROM inventory_cards WHERE is_proxy = 1").fetchall()
             assert len(prox) == 1
-

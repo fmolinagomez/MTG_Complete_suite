@@ -98,18 +98,21 @@ def test_cli_nonexistent_xml_dir_with_locals_continues(tmp_path, capsys):
     missing_dir = tmp_path / "does_not_exist"
     out_dir = tmp_path / "out"
 
-    with patch.object(
-        sys,
-        "argv",
-        [
-            "cli",
-            f"--xml-dir={missing_dir}",
-            f"--out-dir={out_dir}",
-            f"--workdir={tmp_path / 'work'}",
-            f"--local-fronts={front}",
-            f"--local-cardback={back}",
-        ],
-    ), patch("cli.main.run_locals_only", return_value=[out_dir / "locales.pdf"]):
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "cli",
+                f"--xml-dir={missing_dir}",
+                f"--out-dir={out_dir}",
+                f"--workdir={tmp_path / 'work'}",
+                f"--local-fronts={front}",
+                f"--local-cardback={back}",
+            ],
+        ),
+        patch("cli.main.run_locals_only", return_value=[out_dir / "locales.pdf"]),
+    ):
         # Should not raise SystemExit
         cli_main.main()
         out = capsys.readouterr().out
@@ -168,26 +171,24 @@ def test_cli_ignores_non_xml_files_in_input_directory(tmp_path, capsys):
     mock_plan = MagicMock()
     mock_plan.jobs = []
 
-    with patch.object(
-        sys,
-        "argv",
-        [
-            "cli",
-            f"--xml-dir={xml_dir}",
-            f"--out-dir={out_dir}",
-            f"--workdir={tmp_path / 'work'}",
-            "--yes",
-        ],
-    ), patch("cli.main.analyze", return_value=[mock_report]), patch(
-        "cli.main.plan", return_value=mock_plan
-    ), patch(
-        "cli.main.collect_drive_ids", return_value=[("12345", "Black Lotus")]
-    ), patch(
-        "cli.main.check_drive_access", return_value=[]
-    ), patch(
-        "cli.main.run_plan", return_value=[out_dir / "deck.pdf"]
-    ), patch(
-        "cli.main.write_manifest", return_value=out_dir / "manifest.json"
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "cli",
+                f"--xml-dir={xml_dir}",
+                f"--out-dir={out_dir}",
+                f"--workdir={tmp_path / 'work'}",
+                "--yes",
+            ],
+        ),
+        patch("cli.main.analyze", return_value=[mock_report]),
+        patch("cli.main.plan", return_value=mock_plan),
+        patch("cli.main.collect_drive_ids", return_value=[("12345", "Black Lotus")]),
+        patch("cli.main.check_drive_access", return_value=[]),
+        patch("cli.main.run_plan", return_value=[out_dir / "deck.pdf"]),
+        patch("cli.main.write_manifest", return_value=out_dir / "manifest.json"),
     ):
         cli_main.main()
         out = capsys.readouterr().out
@@ -239,25 +240,24 @@ def test_cli_quiet_mode_suppresses_stdout(tmp_path, capsys):
     mock_plan = MagicMock()
     mock_plan.jobs = []
 
-    with patch.object(
-        sys,
-        "argv",
-        [
-            "cli",
-            f"--xml-dir={xml_dir}",
-            f"--out-dir={out_dir}",
-            f"--workdir={tmp_path / 'work'}",
-            "--quiet",
-            "--yes",
-        ],
-    ), patch("cli.main.analyze", return_value=[mock_report]), patch(
-        "cli.main.plan", return_value=mock_plan
-    ), patch(
-        "cli.main.collect_drive_ids", return_value=[]
-    ), patch(
-        "cli.main.run_plan", return_value=[out_dir / "deck.pdf"]
-    ), patch(
-        "cli.main.write_manifest", return_value=None
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "cli",
+                f"--xml-dir={xml_dir}",
+                f"--out-dir={out_dir}",
+                f"--workdir={tmp_path / 'work'}",
+                "--quiet",
+                "--yes",
+            ],
+        ),
+        patch("cli.main.analyze", return_value=[mock_report]),
+        patch("cli.main.plan", return_value=mock_plan),
+        patch("cli.main.collect_drive_ids", return_value=[]),
+        patch("cli.main.run_plan", return_value=[out_dir / "deck.pdf"]),
+        patch("cli.main.write_manifest", return_value=None),
     ):
         cli_main.main()
         captured = capsys.readouterr()
@@ -314,23 +314,24 @@ def test_cli_keyboard_interrupt_clean_exit(tmp_path, capsys):
     mock_plan = MagicMock()
     mock_plan.jobs = []
 
-    with patch.object(
-        sys,
-        "argv",
-        [
-            "cli",
-            f"--xml-dir={xml_dir}",
-            f"--out-dir={out_dir}",
-            f"--workdir={workdir}",
-            "--yes",
-        ],
-    ), patch("cli.main.analyze", return_value=[mock_report]), patch(
-        "cli.main.plan", return_value=mock_plan
-    ), patch(
-        "cli.main.collect_drive_ids", return_value=[]
-    ), patch(
-        "cli.main.run_plan", side_effect=KeyboardInterrupt
-    ), patch("cli.main._cleanup") as mock_cleanup:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "cli",
+                f"--xml-dir={xml_dir}",
+                f"--out-dir={out_dir}",
+                f"--workdir={workdir}",
+                "--yes",
+            ],
+        ),
+        patch("cli.main.analyze", return_value=[mock_report]),
+        patch("cli.main.plan", return_value=mock_plan),
+        patch("cli.main.collect_drive_ids", return_value=[]),
+        patch("cli.main.run_plan", side_effect=KeyboardInterrupt),
+        patch("cli.main._cleanup") as mock_cleanup,
+    ):
         with pytest.raises(SystemExit) as exc:
             cli_main.main()
         assert exc.value.code == 130
@@ -355,24 +356,25 @@ def test_cli_keyboard_interrupt_in_test_mode_preserves_workdir(tmp_path):
     mock_plan = MagicMock()
     mock_plan.jobs = []
 
-    with patch.object(
-        sys,
-        "argv",
-        [
-            "cli",
-            f"--xml-dir={xml_dir}",
-            f"--out-dir={out_dir}",
-            f"--workdir={workdir}",
-            "--test",
-            "--yes",
-        ],
-    ), patch("cli.main.analyze", return_value=[mock_report]), patch(
-        "cli.main.plan", return_value=mock_plan
-    ), patch(
-        "cli.main.collect_drive_ids", return_value=[]
-    ), patch(
-        "cli.main.run_plan", side_effect=KeyboardInterrupt
-    ), patch("cli.main._cleanup") as mock_cleanup:
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "cli",
+                f"--xml-dir={xml_dir}",
+                f"--out-dir={out_dir}",
+                f"--workdir={workdir}",
+                "--test",
+                "--yes",
+            ],
+        ),
+        patch("cli.main.analyze", return_value=[mock_report]),
+        patch("cli.main.plan", return_value=mock_plan),
+        patch("cli.main.collect_drive_ids", return_value=[]),
+        patch("cli.main.run_plan", side_effect=KeyboardInterrupt),
+        patch("cli.main._cleanup") as mock_cleanup,
+    ):
         with pytest.raises(SystemExit) as exc:
             cli_main.main()
         assert exc.value.code == 130
@@ -448,22 +450,22 @@ def test_cli_download_permission_error_formatting(tmp_path, capsys):
     perm_err.xml_name = "deck.xml"
     perm_err.position = "Frente 1"
 
-    with patch.object(
-        sys,
-        "argv",
-        [
-            "cli",
-            f"--xml-dir={xml_dir}",
-            f"--out-dir={out_dir}",
-            f"--workdir={tmp_path / 'work'}",
-            "--yes",
-        ],
-    ), patch("cli.main.analyze", return_value=[mock_report]), patch(
-        "cli.main.plan", return_value=mock_plan
-    ), patch(
-        "cli.main.collect_drive_ids", return_value=[]
-    ), patch(
-        "cli.main.run_plan", side_effect=perm_err
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "cli",
+                f"--xml-dir={xml_dir}",
+                f"--out-dir={out_dir}",
+                f"--workdir={tmp_path / 'work'}",
+                "--yes",
+            ],
+        ),
+        patch("cli.main.analyze", return_value=[mock_report]),
+        patch("cli.main.plan", return_value=mock_plan),
+        patch("cli.main.collect_drive_ids", return_value=[]),
+        patch("cli.main.run_plan", side_effect=perm_err),
     ):
         with pytest.raises(SystemExit) as exc:
             cli_main.main()
@@ -494,22 +496,22 @@ def test_cli_download_timeout_error_formatting(tmp_path, capsys):
     timeout_err.xml_name = "deck.xml"
     timeout_err.position = "Frente 2"
 
-    with patch.object(
-        sys,
-        "argv",
-        [
-            "cli",
-            f"--xml-dir={xml_dir}",
-            f"--out-dir={out_dir}",
-            f"--workdir={tmp_path / 'work'}",
-            "--yes",
-        ],
-    ), patch("cli.main.analyze", return_value=[mock_report]), patch(
-        "cli.main.plan", return_value=mock_plan
-    ), patch(
-        "cli.main.collect_drive_ids", return_value=[]
-    ), patch(
-        "cli.main.run_plan", side_effect=timeout_err
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "cli",
+                f"--xml-dir={xml_dir}",
+                f"--out-dir={out_dir}",
+                f"--workdir={tmp_path / 'work'}",
+                "--yes",
+            ],
+        ),
+        patch("cli.main.analyze", return_value=[mock_report]),
+        patch("cli.main.plan", return_value=mock_plan),
+        patch("cli.main.collect_drive_ids", return_value=[]),
+        patch("cli.main.run_plan", side_effect=timeout_err),
     ):
         with pytest.raises(SystemExit) as exc:
             cli_main.main()
@@ -536,48 +538,45 @@ def test_cli_drive_access_inaccessible_prompt_cancelled_and_accepted(tmp_path, c
     inaccessible = [("id1", "Inaccessible Card")]
 
     # 1. Prompt cancelled ('n')
-    with patch.object(
-        sys,
-        "argv",
-        [
-            "cli",
-            f"--xml-dir={xml_dir}",
-            f"--out-dir={out_dir}",
-            f"--workdir={tmp_path / 'work'}",
-        ],
-    ), patch("cli.main.analyze", return_value=[mock_report]), patch(
-        "cli.main.collect_drive_ids", return_value=[("id1", "Inaccessible Card")]
-    ), patch(
-        "cli.main.check_drive_access", return_value=inaccessible
-    ), patch(
-        "builtins.input", return_value="n"
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "cli",
+                f"--xml-dir={xml_dir}",
+                f"--out-dir={out_dir}",
+                f"--workdir={tmp_path / 'work'}",
+            ],
+        ),
+        patch("cli.main.analyze", return_value=[mock_report]),
+        patch("cli.main.collect_drive_ids", return_value=[("id1", "Inaccessible Card")]),
+        patch("cli.main.check_drive_access", return_value=inaccessible),
+        patch("builtins.input", return_value="n"),
     ):
         cli_main.main()
         out = capsys.readouterr().out
         assert "Cancelado" in out
 
     # 2. Prompt accepted ('s')
-    with patch.object(
-        sys,
-        "argv",
-        [
-            "cli",
-            f"--xml-dir={xml_dir}",
-            f"--out-dir={out_dir}",
-            f"--workdir={tmp_path / 'work'}",
-        ],
-    ), patch("cli.main.analyze", return_value=[mock_report]), patch(
-        "cli.main.collect_drive_ids", return_value=[("id1", "Inaccessible Card")]
-    ), patch(
-        "cli.main.check_drive_access", return_value=inaccessible
-    ), patch(
-        "cli.main.plan", return_value=mock_plan
-    ), patch(
-        "builtins.input", return_value="s"
-    ), patch(
-        "cli.main.run_plan", return_value=[out_dir / "deck.pdf"]
-    ), patch(
-        "cli.main.write_manifest", return_value=None
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "cli",
+                f"--xml-dir={xml_dir}",
+                f"--out-dir={out_dir}",
+                f"--workdir={tmp_path / 'work'}",
+            ],
+        ),
+        patch("cli.main.analyze", return_value=[mock_report]),
+        patch("cli.main.collect_drive_ids", return_value=[("id1", "Inaccessible Card")]),
+        patch("cli.main.check_drive_access", return_value=inaccessible),
+        patch("cli.main.plan", return_value=mock_plan),
+        patch("builtins.input", return_value="s"),
+        patch("cli.main.run_plan", return_value=[out_dir / "deck.pdf"]),
+        patch("cli.main.write_manifest", return_value=None),
     ):
         cli_main.main()
         out = capsys.readouterr().out
@@ -598,25 +597,23 @@ def test_cli_format_warning_prompt_cancelled(tmp_path, capsys):
     mock_plan = MagicMock()
     mock_plan.jobs = []
 
-    with patch.object(
-        sys,
-        "argv",
-        [
-            "cli",
-            f"--xml-dir={xml_dir}",
-            f"--out-dir={out_dir}",
-            f"--workdir={tmp_path / 'work'}",
-        ],
-    ), patch("cli.main.analyze", return_value=[mock_report]), patch(
-        "cli.main.collect_drive_ids", return_value=[]
-    ), patch(
-        "cli.main.plan", return_value=mock_plan
-    ), patch(
-        "cli.main.format_warning", return_value="Aviso: cartas no múltiplo de 9"
-    ), patch(
-        "builtins.input", return_value="n"
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "cli",
+                f"--xml-dir={xml_dir}",
+                f"--out-dir={out_dir}",
+                f"--workdir={tmp_path / 'work'}",
+            ],
+        ),
+        patch("cli.main.analyze", return_value=[mock_report]),
+        patch("cli.main.collect_drive_ids", return_value=[]),
+        patch("cli.main.plan", return_value=mock_plan),
+        patch("cli.main.format_warning", return_value="Aviso: cartas no múltiplo de 9"),
+        patch("builtins.input", return_value="n"),
     ):
         cli_main.main()
         out = capsys.readouterr().out
         assert "Cancelado" in out
-

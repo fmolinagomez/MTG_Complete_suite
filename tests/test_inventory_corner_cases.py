@@ -1,6 +1,5 @@
 """Corner-case test suite for ManaBox CSV parsing, various encodings, malformed CSVs, and Option C multi-deck stock allocation."""
 
-
 import pytest
 
 from src.inventory.manabox_csv import parse_manabox_csv
@@ -11,7 +10,9 @@ from src.inventory.service import InventoryService
 class TestManaBoxCSVEncodings:
     def test_utf8_with_bom(self, tmp_path):
         """CSV file saved with UTF-8 BOM is parsed without corrupting first header."""
-        csv_text = "\ufeffName,Set code,Collector number,Quantity,Foil\nLightning Bolt,2ED,162,4,normal\n"
+        csv_text = (
+            "\ufeffName,Set code,Collector number,Quantity,Foil\nLightning Bolt,2ED,162,4,normal\n"
+        )
         csv_path = tmp_path / "bom.csv"
         csv_path.write_bytes(csv_text.encode("utf-8-sig"))
 
@@ -68,10 +69,7 @@ class TestNonStandardHeadersAndAliases:
         assert cards[1].is_foil is True
 
     def test_more_header_aliases_and_case_insensitivity(self):
-        csv_text = (
-            "Card,Set Code,Card #,Quantity Owned,Finish\n"
-            "Demonic Tutor,STA,27,2,normal\n"
-        )
+        csv_text = "Card,Set Code,Card #,Quantity Owned,Finish\nDemonic Tutor,STA,27,2,normal\n"
         cards = parse_manabox_csv(csv_text)
         assert len(cards) == 1
         assert cards[0].name == "Demonic Tutor"
@@ -108,12 +106,7 @@ class TestMalformedAndEmptyRows:
         assert cards[0].quantity == 1
 
     def test_missing_name_row_skipped(self):
-        csv_text = (
-            "Name,Set code,Collector number,Quantity\n"
-            ",LEA,1,1\n"
-            "   ,LEA,2,1\n"
-            "Valid,LEA,3,1\n"
-        )
+        csv_text = "Name,Set code,Collector number,Quantity\n,LEA,1,1\n   ,LEA,2,1\nValid,LEA,3,1\n"
         cards = parse_manabox_csv(csv_text)
         assert len(cards) == 1
         assert cards[0].name == "Valid"
@@ -241,12 +234,36 @@ class TestComplexStockAllocationOptionC:
     def test_register_deck_with_existing_and_non_existing_id(self, inventory_service):
         # 1. Insert new deck
         deck1 = DeckRecord(name="Explicit ID Deck", format="Modern")
-        d1_id = inventory_service.register_deck(deck1, [DeckCardEntry(deck_id=0, oracle_id="oid-bolt", name="Bolt", set_code="m11", collector_number="149", quantity_required=4)])
+        d1_id = inventory_service.register_deck(
+            deck1,
+            [
+                DeckCardEntry(
+                    deck_id=0,
+                    oracle_id="oid-bolt",
+                    name="Bolt",
+                    set_code="m11",
+                    collector_number="149",
+                    quantity_required=4,
+                )
+            ],
+        )
         assert d1_id > 0
 
         # 2. Update existing deck with ID d1_id
         deck1_updated = DeckRecord(id=d1_id, name="Updated Explicit ID Deck", format="Legacy")
-        d1_updated_id = inventory_service.register_deck(deck1_updated, [DeckCardEntry(deck_id=d1_id, oracle_id="oid-bolt", name="Bolt", set_code="m11", collector_number="149", quantity_required=3)])
+        d1_updated_id = inventory_service.register_deck(
+            deck1_updated,
+            [
+                DeckCardEntry(
+                    deck_id=d1_id,
+                    oracle_id="oid-bolt",
+                    name="Bolt",
+                    set_code="m11",
+                    collector_number="149",
+                    quantity_required=3,
+                )
+            ],
+        )
         assert d1_updated_id == d1_id
 
         loaded_deck, loaded_cards = inventory_service.get_deck_by_id(d1_id)
@@ -267,8 +284,22 @@ class TestComplexStockAllocationOptionC:
         # 3. Deck with cards: import as physical cards
         deck_with_cards = DeckRecord(name="Deck With Cards")
         cards = [
-            DeckCardEntry(deck_id=0, oracle_id="o-1", name="Card 1", set_code="set1", collector_number="1", quantity_required=2),
-            DeckCardEntry(deck_id=0, oracle_id="o-2", name="Card 2", set_code="set2", collector_number="2", quantity_required=3),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="o-1",
+                name="Card 1",
+                set_code="set1",
+                collector_number="1",
+                quantity_required=2,
+            ),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="o-2",
+                name="Card 2",
+                set_code="set2",
+                collector_number="2",
+                quantity_required=3,
+            ),
         ]
         deck_id = inventory_service.register_deck(deck_with_cards, cards)
 
@@ -287,22 +318,43 @@ class TestComplexStockAllocationOptionC:
     def test_stock_allocation_alternative_match_deduction(self, inventory_service):
         # Inventory has 2 copies of Counterspell (EMA edition)
         inventory_service.add_or_update_card(
-            InventoryCard(oracle_id="oid-cs", name="Counterspell", set_code="ema", collector_number="43", quantity=2)
+            InventoryCard(
+                oracle_id="oid-cs",
+                name="Counterspell",
+                set_code="ema",
+                collector_number="43",
+                quantity=2,
+            )
         )
 
         # Deck 1 used 1 copy of Counterspell in ICE edition (alternative/oracle match)
         deck1_cards = [
-            DeckCardEntry(deck_id=0, oracle_id="oid-cs", name="Counterspell", set_code="ice", collector_number="57", quantity_required=1, is_proxy=False)
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="oid-cs",
+                name="Counterspell",
+                set_code="ice",
+                collector_number="57",
+                quantity_required=1,
+                is_proxy=False,
+            )
         ]
         inventory_service.register_deck(DeckRecord(name="Deck 1"), deck1_cards)
 
         # Deck 2 requests 2 copies of Counterspell
         deck2_cards = [
-            DeckCardEntry(deck_id=0, oracle_id="oid-cs", name="Counterspell", set_code="ema", collector_number="43", quantity_required=2, is_proxy=False)
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="oid-cs",
+                name="Counterspell",
+                set_code="ema",
+                collector_number="43",
+                quantity_required=2,
+                is_proxy=False,
+            )
         ]
 
         # In exclusive mode, 1 physical copy was deducted by Deck 1 alternative match, so only 1 exact match remains and 1 is missing
         plan = inventory_service.calculate_missing_proxies(deck2_cards, allocate_mode="exclusive")
         assert plan.total_owned == 1
         assert plan.total_missing == 1
-

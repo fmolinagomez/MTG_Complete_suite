@@ -54,7 +54,9 @@ class TestScryfallCacheAndCorruptFiles:
 
         with (
             patch("src.scryfall.fetch_card", return_value=mock_scryfall),
-            patch("src.scryfall._throttled_get", return_value=_mock_resp(content=b"VALID_IMAGE_DATA")) as mock_get,
+            patch(
+                "src.scryfall._throttled_get", return_value=_mock_resp(content=b"VALID_IMAGE_DATA")
+            ) as mock_get,
             patch("src.scryfall.check_image_quality", return_value=(True, 150.0, (800, 1120))),
         ):
             front, back = download_card_images(card, tmp_path, quality_check=True)
@@ -87,7 +89,9 @@ class TestScryfallRateLimitingAndRetries:
     def test_http_429_with_numeric_retry_after_header(self):
         """429 with Retry-After header backs off and succeeds on next attempt."""
         resp_429 = _mock_resp(status=429, headers={"Retry-After": "0.05"})
-        resp_200 = _mock_resp(json_data={"image_uris": {"large": "https://example.com/ok.jpg"}}, status=200)
+        resp_200 = _mock_resp(
+            json_data={"image_uris": {"large": "https://example.com/ok.jpg"}}, status=200
+        )
 
         with (
             patch("requests.get", side_effect=[resp_429, resp_200]) as mock_req,
@@ -102,7 +106,9 @@ class TestScryfallRateLimitingAndRetries:
     def test_http_429_with_invalid_retry_after_falls_back_to_exponential(self):
         """429 with malformed Retry-After header falls back to default backoff."""
         resp_429 = _mock_resp(status=429, headers={"Retry-After": "not-a-number"})
-        resp_200 = _mock_resp(json_data={"image_uris": {"large": "https://example.com/ok.jpg"}}, status=200)
+        resp_200 = _mock_resp(
+            json_data={"image_uris": {"large": "https://example.com/ok.jpg"}}, status=200
+        )
 
         with (
             patch("requests.get", side_effect=[resp_429, resp_200]) as mock_req,
@@ -192,7 +198,10 @@ class TestDigitalOnlyAndMissingFaceData:
             "layout": "transform",
             "oracle_id": "uuid-mdfc",
             "card_faces": [
-                {"name": "Front", "image_uris": {"large": "https://cards.scryfall.io/large/front.jpg"}},
+                {
+                    "name": "Front",
+                    "image_uris": {"large": "https://cards.scryfall.io/large/front.jpg"},
+                },
                 {"name": "Back", "image_uris": None},
             ],
         }
@@ -244,6 +253,7 @@ class TestBulkDeckDownloadsMixedResponses:
 
     def test_download_deck_images_cancel_and_progress_callback(self, tmp_path):
         import threading
+
         from src.cancellation import Cancelled
 
         cards = [DeckCard("Card 1", "m21", "1", 1, "main")]
@@ -265,12 +275,13 @@ class TestBulkDeckDownloadsMixedResponses:
         fake_scryfall = ScryfallCard("https://cards.scryfall.io/large/front/0/0/front.jpg", None)
 
         with (
-            patch("src.scryfall.fetch_card", side_effect=[fake_scryfall, Exception("English fallback failed")]),
+            patch(
+                "src.scryfall.fetch_card",
+                side_effect=[fake_scryfall, Exception("English fallback failed")],
+            ),
             patch("src.scryfall._throttled_get", return_value=_mock_resp(content=b"IMG")),
             patch("src.scryfall.check_image_quality", return_value=(False, 10.0, (100, 100))),
         ):
             f, b = download_card_images(card, tmp_path, lang="es", quality_check=True)
             assert f.exists()
             assert b is None
-
-

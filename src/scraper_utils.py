@@ -8,16 +8,21 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from threading import Event
 from typing import Any, TypeVar
 
 import requests
 
+from src.cancellation import Cancelled
+from src.constants import ProgressCallback
+from src.http_client import get as http_get
+
 _log = logging.getLogger(__name__)
 
 DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
 )
 
 DEFAULT_HEADERS = {
@@ -106,9 +111,17 @@ def fetch_url(
                 timeout=timeout,
                 **kwargs,
             )
-            if raise_for_status and resp.status_code in RETRYABLE_STATUS_CODES and attempt < retries:
+            if (
+                raise_for_status
+                and resp.status_code in RETRYABLE_STATUS_CODES
+                and attempt < retries
+            ):
                 retry_after = resp.headers.get("Retry-After")
-                sleep_time = float(retry_after) if retry_after and retry_after.isdigit() else backoff_factor * (2**attempt)
+                sleep_time = (
+                    float(retry_after)
+                    if retry_after and retry_after.isdigit()
+                    else backoff_factor * (2**attempt)
+                )
                 _log.warning(
                     "HTTP %d fetching %s (attempt %d/%d). Retrying in %.2fs",
                     resp.status_code,
@@ -139,7 +152,11 @@ def fetch_url(
                 break
         except requests.HTTPError as exc:
             last_exc = exc
-            if exc.response is not None and exc.response.status_code in RETRYABLE_STATUS_CODES and attempt < retries:
+            if (
+                exc.response is not None
+                and exc.response.status_code in RETRYABLE_STATUS_CODES
+                and attempt < retries
+            ):
                 sleep_time = backoff_factor * (2**attempt)
                 time.sleep(sleep_time)
             else:
@@ -190,6 +207,15 @@ def resources_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "resources"
 
 
+def bundled_back(game: str, stem: str = "back") -> Path | None:
+    """Find a bundled card back without coupling a scraper to one image format."""
+    back_dir = resources_dir() / "backs" / game
+    for suffix in (".png", ".jpg", ".jpeg", ".webp"):
+        if (path := back_dir / f"{stem}{suffix}").exists():
+            return path
+    return None
+
+
 def generate_fallback_back(
     path: Path,
     bg: str,
@@ -208,3 +234,35 @@ def generate_fallback_back(
     img.save(path, "PNG")
     return path
 
+
+def download_url_images(
+    urls: dict[str, str],
+    dest_dir: Path,
+    path_for_key: Callable[[str, str], Path],
+    headers: dict[str, str],
+    cancel_event: Event | None = None,
+    progress_cb: ProgressCallback = None,
+) -> dict[str, Path]:
+    """Cache and download keyed image URLs with consistent cancellation/progress."""
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    def _fetch(key: str, url: str) -> tuple[str, Path]:
+        path = path_for_key(key, url)
+        if not path.exists():
+            response = http_get(url, headers=headers)
+            path.write_bytes(response.content)
+        return key, path
+
+    result: dict[str, Path] = {}
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(_fetch, key, url): key for key, url in urls.items()}
+        for done, future in enumerate(as_completed(futures), start=1):
+            if cancel_event and cancel_event.is_set():
+                for pending in futures:
+                    pending.cancel()
+                raise Cancelled()
+            key, path = future.result()
+            result[key] = path
+            if progress_cb:
+                progress_cb(done, len(urls))
+    return result

@@ -196,7 +196,9 @@ class App:
                     if event.status == JobStatus.COMPLETED:
                         self.status_label.config(text=f"Tarea completada: {event.job_id}")
                     elif event.status == JobStatus.FAILED:
-                        self.status_label.config(text=f"Error en tarea {event.job_id}: {event.error}")
+                        self.status_label.config(
+                            text=f"Error en tarea {event.job_id}: {event.error}"
+                        )
                     elif event.status == JobStatus.CANCELLED:
                         self.status_label.config(text=f"Tarea cancelada: {event.job_id}")
 
@@ -247,7 +249,9 @@ class App:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    )
     app = App()
     app.run()
 

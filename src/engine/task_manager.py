@@ -108,7 +108,11 @@ class TaskManager:
                 pass
 
             job_kwargs = dict(kwargs)
-            if sig is not None and "cancel_event" in sig.parameters and "cancel_event" not in job_kwargs:
+            if (
+                sig is not None
+                and "cancel_event" in sig.parameters
+                and "cancel_event" not in job_kwargs
+            ):
                 job_kwargs["cancel_event"] = cancel_event
 
             job = Job(
@@ -234,7 +238,8 @@ class TaskManager:
         """Return all jobs that are currently pending or running."""
         with self._lock:
             return [
-                job for job in self._jobs.values()
+                job
+                for job in self._jobs.values()
                 if job.status in (JobStatus.PENDING, JobStatus.RUNNING)
             ]
 

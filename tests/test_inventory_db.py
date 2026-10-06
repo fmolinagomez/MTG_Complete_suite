@@ -108,7 +108,9 @@ class TestInventoryDB:
 
         # Confirm insertion
         with get_db(db_file) as conn:
-            deck_card_count = conn.execute("SELECT COUNT(*) FROM deck_cards WHERE deck_id = ?", (deck_id,)).fetchone()[0]
+            deck_card_count = conn.execute(
+                "SELECT COUNT(*) FROM deck_cards WHERE deck_id = ?", (deck_id,)
+            ).fetchone()[0]
             assert deck_card_count == 1
 
             # Delete deck
@@ -116,5 +118,7 @@ class TestInventoryDB:
 
         # Confirm cascade deletion of deck_cards
         with get_db(db_file) as conn:
-            remaining_cards = conn.execute("SELECT COUNT(*) FROM deck_cards WHERE deck_id = ?", (deck_id,)).fetchone()[0]
+            remaining_cards = conn.execute(
+                "SELECT COUNT(*) FROM deck_cards WHERE deck_id = ?", (deck_id,)
+            ).fetchone()[0]
             assert remaining_cards == 0

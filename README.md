@@ -2,22 +2,22 @@
 Si buscas un tutorial mira aquí -> [https://github.com/Diphendara/MPCFillToPDF/wiki/Tutorial](https://github.com/Diphendara/MPCFillToPDF/wiki/1-%E2%80%90-Tutorial)
 
 # Sugerencias, bugs etc
-Puedes buscarme en twitter/bsky como @diphendara o abrirme una issue por github
+Puedes buscarme en twitter/bsky como @diphendara o abrirme una issue por github.
 
 
 # MPCFillToPDF Suite
 
-Suite integral de herramientas para jugadores y coleccionistas de juegos de cartas coleccionables (Magic: The Gathering, One Piece, Lorcana, Riftbound). 
+Suite integral de herramientas para jugadores y coleccionistas de juegos de cartas coleccionables (Magic: The Gathering, One Piece, Lorcana, Riftbound, Yu-Gi-Oh!).
 
 Permite:
 1. **🏠 Splash Hub & Navegación Modular**: Acceso rápido y fluido mediante barra de navegación superior persistente a todos los módulos.
-2. **📄 Generador de PDFs**: Convierte proyectos de [MPCFill](https://mpcfill.com/) (XML) o mazos desde URLs en PDFs optimizados para imprenta (A4, 3×3 cartas por página, doble cara con dorsos espejados y líneas de corte).
+2. **📄 Generador de PDFs**: Convierte proyectos de [MPCFill](https://mpcfill.com/) (XML), mazos desde URLs o imágenes locales en PDFs optimizados para imprenta (A4, 3×3 cartas por página, doble cara con dorsos espejados y líneas de corte).
 3. **🔍 Validador Técnico**: Audita mazos (Moxfield/Scryfall) comprobando resolución mínima (300 DPI), nitidez (filtro Laplaciano contra imágenes borrosas) y disponibilidad de artes en alta calidad con previsualización flotante instantánea.
 4. **📦 Inventario de Cartas & Gestor de Mazos**: Base de datos SQLite local (`inventario.db`), importación de colecciones desde CSV de **ManaBox** (modos *Merge* o *Replace*), cálculo inteligente de stock físico vs. proxies necesarios para imprimir y visor flotante de imágenes al pasar el ratón.
 
 ---
 
-## 🚀 Novedades y Módulos
+## 🚀 Módulos Principales
 
 ### 1. Inventario de Cartas y Gestor de Mazos (`src/inventory/`)
 - **Base de Datos Local SQLite (`MPCFillToPDF/inventario.db`)**: 100% portable y persistente entre ejecuciones y actualizaciones.
@@ -35,138 +35,139 @@ Permite:
 
 ---
 
-## Webs soportadas para diferentes TCG
+## 🃏 Webs y Juegos Soportados
 
 ### Magic: The Gathering
-- **Moxfield, Archidekt, TappedOut, ManaBox**: Pega la URL del mazo para validarlo, importarlo a tu inventario o generar el PDF de proxies faltantes.
+| Web | Formato de URL |
+| --- | --- |
+| Moxfield | `https://www.moxfield.com/decks/ID` |
+| Archidekt | `https://archidekt.com/decks/ID` |
+| Deckstats | `https://deckstats.net/decks/ID/...` |
+| TappedOut | `https://tappedout.net/mtg-decks/nombre-del-mazo/` |
+| ManaBox | `https://manabox.app/decks/ID` |
+
+Las imágenes se obtienen de **Scryfall**, por edición y número de colección o por nombre cuando faltan esos datos. Admite cartas de dos caras (MDFCs) y selección opcional de tokens.
 
 ### One Piece Card Game
-
-| Web | URL de ejemplo |
-|-----|---------------|
+| Web | Formato de URL |
+| --- | --- |
 | [onepiece.gg](https://onepiece.gg) | `https://onepiece.gg/decks/nombre-del-mazo` |
 | [deckbuilder.egmanevents.com](https://deckbuilder.egmanevents.com) | `https://deckbuilder.egmanevents.com/?deck=CARTA:X,...` o `https://deckbuilder.egmanevents.com/d/CODIGO` |
 | [deckbuilder.cardkaizoku.com](https://deckbuilder.cardkaizoku.com) | `https://deckbuilder.cardkaizoku.com/?deck=2xOP01-001\|3xOP01-002\|...` |
 
----
+Los líderes usan un reverso específico; el resto usa el reverso estándar de One Piece.
 
 ### Riftbound TCG
-
-| Web | URL de ejemplo |
-|-----|---------------|
+| Web | Formato de URL |
+| --- | --- |
 | [riftbound.gg](https://riftbound.gg) | `https://riftbound.gg/decks/nombre-del-mazo/` |
-| [piltoverarchive.com](https://piltoverarchive.com) | `https://piltoverarchive.com/decks/view/<UUID>` |
+| [piltoverarchive.com](https://piltoverarchive.com) | `https://piltoverarchive.com/decks/view/UUID` |
 | [riftmana.com](https://riftmana.com) | `https://riftmana.com/decks/nombre-del-mazo` |
-| [riftbinder.com](https://riftbinder.com) | `https://riftbinder.com/decks/<ID>` |
-| [riftdex.com](https://riftdex.com) | `https://riftdex.com/deck/<UUID>` |
+| [riftbinder.com](https://riftbinder.com) | `https://riftbinder.com/decks/ID` |
+| [riftdex.com](https://riftdex.com) | `https://riftdex.com/deck/UUID` |
 
----
+Los reversos se asignan según la sección de la carta (leyenda, campo de batalla, runa o mazo).
 
 ### Lorcana
-
-| Web | URL de ejemplo |
-|-----|---------------|
+| Web | Formato de URL |
+| --- | --- |
 | [lorcana.gg](https://lorcana.gg) | `https://lorcana.gg/decks/nombre-del-mazo/` |
 | [inkdecks.com](https://inkdecks.com) | `https://inkdecks.com/lorcana-metagame/deck-nombre-ID` |
-| [dreamborn.ink](https://dreamborn.ink) | `https://dreamborn.ink/es/decks/ID` |
+
+Todas las cartas usan el reverso de Lorcana.
+
+### Yu-Gi-Oh!
+Puedes pegar una URL pública de **YGOPRODeck**, **Master Duel Meta**, **Yu-Gi-Oh! Meta** o **Edison Format**, o una cadena `ydke://` exportada desde un constructor. Las cartas se resuelven con la API de YGOPRODeck. Los mazos de Yu-Gi-Oh! generan un PDF con su propio formato japonés (trim de 59 × 86 mm) y reverso oficial.
 
 ---
 
-## Instalación y Ejecución con `uv` (Recomendado)
+## 🛠️ Instalación y Ejecución
 
-Este proyecto utiliza **[uv](https://docs.astral.sh/uv/)** para la gestión ultrarrápida y reproducible de dependencias, entornos y herramientas.
+Necesitas **Python 3.10 o superior**. Se recomienda usar [uv](https://github.com/astral-sh/uv) para la gestión del entorno y dependencias:
 
-### 1. Requisitos previos
-- Instalar `uv` (si aún no lo tienes):
-  ```bash
-  # macOS / Linux
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-
-  # Windows (PowerShell)
-  powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-  ```
-
-### 2. Sincronizar el entorno y dependencias
-En la raíz del proyecto, ejecuta:
-```bash
+```sh
+# Sincronizar dependencias
 uv sync
-```
-Esto creará automáticamente el entorno virtual (`.venv`) e instalará todas las dependencias necesarias y de desarrollo de forma instantánea.
 
-### 3. Lanzar la aplicación GUI (Suite Completa)
-```bash
+# Ejecutar la aplicación gráfica (GUI modular)
 uv run python -m gui.main
-# o mediante el entrypoint registrado:
-uv run mpcfill-gui
+
+# Ejecutar la herramienta en línea de comandos (CLI)
+uv run python -m cli.main --help
 ```
 
-### 4. Modo por lotes en línea de comandos (CLI)
-```bash
-uv run python -m cli.main
-# o mediante el entrypoint registrado:
-uv run mpcfill-cli
-```
-Procesa todos los archivos `.xml` ubicados en `xml/` y deposita los PDFs resultantes en `out/`.
+---
 
-### 5. Ejecutar la suite de pruebas y linter
-```bash
-# Tests unitarios y de regresión
-uv run pytest
+## 🔑 Google Drive: clave de API opcional
 
-# Verificación de linter
-uv run ruff check .
+Los XML de MPCFill contienen identificadores de imágenes alojadas en Google Drive. Sin clave, el programa descarga mediante `gdown`. Para usar la API de Drive al ejecutar desde el código, copia `config.example.json` a `config.json` en la raíz y sustituye el valor:
+
+```json
+{
+  "google_drive_api_key": "TU_CLAVE_DE_API"
+}
 ```
 
-### 6. Empaquetar como `.exe` portable (Windows)
-```bash
+---
+
+## 💻 Línea de Comandos (CLI)
+
+```sh
+# Procesar lote de XMLs
+uv run python -m cli.main --xml-dir xml --out-dir out --workdir workdir
+
+# Generar a partir de imágenes locales
+uv run python -m cli.main --local-fronts c1.jpg c2.png --local-cardback back.jpg --locals-base-name mi_mazo --yes
+
+# Generar directamente desde una URL de mazo
+uv run python -m cli.main --deck-url "https://www.moxfield.com/decks/TU_MAZO" --out-dir out
+```
+
+| Opción | Comportamiento |
+| --- | --- |
+| `--xml-dir`, `--out-dir`, `--workdir` | Carpetas de entrada, salida y trabajo; por defecto `xml`, `out` y `workdir`. |
+| `--deck-url URL` | Descarga y procesa un mazo directamente desde la URL de la plataforma compatible. |
+| `--local-fronts IMG ...` | Añade frontales locales o genera exclusivamente con imágenes locales. |
+| `--local-backs IMG ...` | Reversos emparejados por orden con los frontales locales. |
+| `--local-cardback IMG` | Reverso predeterminado obligatorio cuando no hay XML. |
+| `--locals-base-name NAME` | Nombre base para generación sin XML; por defecto `locales`. |
+| `--local-needs-crop` | Recorta el borde MPC de las imágenes locales. |
+| `--fronts-only` | Genera solo frontales omitiendo las páginas de traseras. |
+| `--workers N` | Número de hilos concurrentes para procesamiento. |
+| `--chunk-size N` | Tamaño de bloque para procesamiento. |
+| `--test` | Conserva `workdir/raw` y `workdir/bled` al terminar. |
+| `--yes`, `-y` | Continúa sin pedir confirmación por huecos o avisos de acceso a Drive. |
+| `--verbose`, `-v` | Muestra logs de depuración en stderr además de escribir `run.log`. |
+
+---
+
+## 📐 Formato del PDF y Reglas de Impresión
+
+- **A4 vertical**: 210 × 297 mm, 3 columnas × 3 filas = 9 cartas por página.
+- **Tamaño estándar (MTG, One Piece, Lorcana, Riftbound)**: Carta recortada a 63,5 × 88,9 mm con sangrado en espejo de 1 mm (imagen final de 65,5 × 90,9 mm).
+- **Tamaño japonés (Yu-Gi-Oh!)**: Carta de 59 × 86 mm (imagen final de 61 × 88 mm).
+- **Líneas de corte**: Marcas de corte configurables (color, grosor, modo marcas de margen o líneas continuas cruzadas).
+- **División inteligente por tamaño**: Límite configurable de MB por PDF (por defecto 200 MB, hasta 2,5 GB) en los ajustes para evitar archivos excesivamente grandes manteniendo intactas las parejas de doble cara.
+
+---
+
+## 📦 Empaquetado (.exe)
+
+```sh
 uv run python build_exe.py
 ```
-Genera `dist/MPCFillToPDF.exe`. El ejecutable es completamente portable: en el directorio donde se ejecute creará automáticamente:
-- `MPCFillToPDF/inventario.db` (Base de datos SQLite de tu colección y mazos).
-- `MPCFillToPDF/archivos generados/` (PDFs listos para imprimir).
-- `MPCFillToPDF/procesamiento/` (Caché de imágenes intermedias y miniaturas).
+
+Genera `dist/MPCFillToPDF.exe` (Windows) o `dist/MPCFillToPDF` (macOS/Linux) empaquetado de forma autónoma con todos los recursos e iconos.
 
 ---
 
-### Instalación tradicional con `pip` (Alternativa)
-Si prefieres no usar `uv`:
-```bash
-python -m venv .venv
-source .venv/bin/activate    # En Linux / macOS
-.venv\Scripts\activate       # En Windows
+## 🧪 Pruebas Automatizadas
 
-pip install -r requirements.txt
-python -m gui.main
+```sh
+# Ejecutar toda la suite de pruebas unitarias e integración
+uv run pytest
+
+# Verificación de estilo y tipado
+uv run ruff check .
+uv run ruff format --check .
 ```
-
----
-
-## Estructura del Proyecto
-
-```
-MPCFillToPDF/
-├── src/
-│   ├── engine/                # Motor de tareas en segundo plano (TaskManager, colas de eventos)
-│   ├── inventory/             # Dominio de Inventario SQLite, importador ManaBox y solver de proxies
-│   │   ├── db.py              # Esquema SQLite, WAL mode e índices
-│   │   ├── models.py          # Modelos InventoryCard, DeckRecord, DeckCardMatchDetail, MissingProxyPlan
-│   │   ├── manabox_csv.py     # Parser CSV con soporte Merge y Replace
-│   │   └── service.py         # CRUD de colección, disponibilidad exacta/alternativa y asignación de stock
-│   ├── parser.py              # Parser de XMLs de MPCFill
-│   ├── downloader.py          # Descargador concurrente con control de reintentos
-│   ├── cropper.py             # Recorte de sangrado MPC y generación de espejo
-│   ├── pdf_generator.py       # Ensamblado de PDFs (ReportLab) con límites de tamaño
-│   ├── pipeline.py            # Orquestador del flujo de impresión
-│   ├── scryfall.py            # Cliente API Scryfall y gestión de caché
-│   └── quality.py             # Análisis de resolución y nitidez (Laplaciano)
-├── gui/
-│   ├── main.py                # Punto de entrada de la aplicación GUI
-│   ├── app.py                 # Ventana única, enrutador y ciclo de vida
-│   ├── paths.py               # Resolución de rutas de datos persistentes
-│   ├── components/            # Widgets reutilizables (NavBar, CardHoverPreview)
-│   └── views/                 # Pantallas (HubView, InventoryView, GeneratorView, ValidatorView, SettingsView)
-├── cli/                       # Procesador desatendido en consola
-├── docs/                      # Documentos de arquitectura, ADRs y planes
-└── tests/                     # Suite completa de pruebas automatizadas (772+ tests)
-```
-

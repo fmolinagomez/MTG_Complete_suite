@@ -92,7 +92,10 @@ class TestGeneratorViewCornerCases:
         txt_file.write_text("not an xml", encoding="utf-8")
         png_file = make_rgb_image(tmp_path / "image.png")
 
-        with patch("gui.views.generator_tabs.analyze", return_value=[]), patch("gui.views.generator_tabs.parse", return_value=None):
+        with (
+            patch("gui.views.generator_tabs.analyze", return_value=[]),
+            patch("gui.views.generator_tabs.parse", return_value=None),
+        ):
             view._on_drop_xmls([str(xml_file), str(txt_file), str(png_file)])
 
         assert len(view.state.xml_paths) == 1
@@ -497,12 +500,20 @@ class TestInventoryViewCornerCases:
         try:
             service.add_or_update_card(
                 InventoryCard(
-                    oracle_id="oid-a", name="Card A", set_code="set1", collector_number="1", quantity=1
+                    oracle_id="oid-a",
+                    name="Card A",
+                    set_code="set1",
+                    collector_number="1",
+                    quantity=1,
                 )
             )
             service.add_or_update_card(
                 InventoryCard(
-                    oracle_id="oid-b", name="Card B", set_code="set2", collector_number="2", quantity=2
+                    oracle_id="oid-b",
+                    name="Card B",
+                    set_code="set2",
+                    collector_number="2",
+                    quantity=2,
                 )
             )
 
@@ -595,7 +606,15 @@ class TestInventoryViewCornerCases:
             assert len(items) == 4
 
             # Sort by Quantity, Available, in_decks, Foil, Proxy, Condition, Language
-            for col in ("quantity", "available", "in_decks", "foil", "proxy", "condition", "language"):
+            for col in (
+                "quantity",
+                "available",
+                "in_decks",
+                "foil",
+                "proxy",
+                "condition",
+                "language",
+            ):
                 view._sort_collection_by_column(col)
 
             assert len(view.inv_tree.get_children()) == 4

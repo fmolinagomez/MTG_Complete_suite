@@ -70,6 +70,7 @@ class TestJobDataclasses:
 class TestTaskManagerExecution:
     def test_submit_and_complete_job(self):
         with TaskManager(max_workers=2) as tm:
+
             def add(a, b):
                 return a + b
 
@@ -91,6 +92,7 @@ class TestTaskManagerExecution:
 
     def test_submit_with_kwargs(self):
         with TaskManager(max_workers=2) as tm:
+
             def greet(name, prefix="Hello"):
                 return f"{prefix}, {name}!"
 
@@ -101,6 +103,7 @@ class TestTaskManagerExecution:
 
     def test_concurrent_jobs(self):
         with TaskManager(max_workers=4) as tm:
+
             def worker(val):
                 time.sleep(0.02)
                 return val * 10
@@ -150,6 +153,7 @@ class TestTaskManagerExecution:
 class TestTaskManagerProgressReporting:
     def test_progress_events_emitted_and_polled(self):
         with TaskManager(max_workers=2) as tm:
+
             def multistep_worker():
                 return "finished"
 
@@ -213,6 +217,7 @@ class TestTaskManagerCancellation:
 
     def test_cancel_job_raising_cancelled_exception(self):
         with TaskManager(max_workers=2) as tm:
+
             def cancelling_worker():
                 raise Cancelled()
 
@@ -252,6 +257,7 @@ class TestTaskManagerCancellation:
 class TestTaskManagerErrorHandling:
     def test_job_raising_exception(self):
         with TaskManager(max_workers=2) as tm:
+
             def failing_worker():
                 raise ValueError("Algo salió mal en el proceso")
 

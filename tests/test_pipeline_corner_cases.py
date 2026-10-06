@@ -126,6 +126,7 @@ class TestZeroCardsHandling:
             )
             # or run_merged with []
             from src.pipeline import run_merged
+
             run_merged(
                 xml_paths=[],
                 output_dir=tmp_path / "out",
@@ -136,7 +137,9 @@ class TestZeroCardsHandling:
         empty_deck = FetchedDeck(name="Empty Deck", cards=[])
         with patch("src.pipeline.fetch_deck", return_value=empty_deck):
             with pytest.raises(ValueError, match="no contiene cartas"):
-                run_deck_url("https://moxfield.com/decks/dummy", tmp_path / "out", tmp_path / "work", "empty")
+                run_deck_url(
+                    "https://moxfield.com/decks/dummy", tmp_path / "out", tmp_path / "work", "empty"
+                )
 
     def test_generate_pdf_with_zero_slots_returns_empty_list_and_creates_no_file(self, tmp_path):
         out_dir = tmp_path / "out_empty"
@@ -158,7 +161,10 @@ class TestChunkingBoundaries:
         ordered_slots = list(range(card_count))
         front_map = {i: f"F_{i}" for i in ordered_slots}
         back_map = {i: f"B_{i}" for i in ordered_slots}
-        id_to_path = {**{f"F_{i}": img_path for i in ordered_slots}, **{f"B_{i}": img_path for i in ordered_slots}}
+        id_to_path = {
+            **{f"F_{i}": img_path for i in ordered_slots},
+            **{f"B_{i}": img_path for i in ordered_slots},
+        }
 
         return generate(
             output_dir=tmp_path / f"out_{card_count}",

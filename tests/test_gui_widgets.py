@@ -13,10 +13,8 @@ Covers:
 from __future__ import annotations
 
 import io
-import queue
 import sys
 import tkinter as tk
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -80,14 +78,20 @@ class TestNotify:
 
     def test_notify_non_darwin_plyer(self):
         mock_plyer_notif = MagicMock()
-        with patch("sys.platform", "win32"), patch.dict("sys.modules", {"plyer": MagicMock(notification=mock_plyer_notif)}):
+        with (
+            patch("sys.platform", "win32"),
+            patch.dict("sys.modules", {"plyer": MagicMock(notification=mock_plyer_notif)}),
+        ):
             notify("WinTitle", "WinMessage")
             mock_plyer_notif.notify.assert_called_once_with(
                 title="WinTitle", message="WinMessage", app_name="MPCFillToPDF", timeout=8
             )
 
     def test_notify_silently_handles_exceptions(self):
-        with patch("sys.platform", "darwin"), patch("subprocess.run", side_effect=RuntimeError("Process error")):
+        with (
+            patch("sys.platform", "darwin"),
+            patch("subprocess.run", side_effect=RuntimeError("Process error")),
+        ):
             # Should not raise exception
             notify("Title", "Message")
 
@@ -114,7 +118,10 @@ class TestLoadTabIcon:
         img.save(icons_dir / "test_icon.png")
 
         # Frozen mode
-        with patch.object(sys, "frozen", True, create=True), patch.object(sys, "_MEIPASS", str(tmp_path), create=True):
+        with (
+            patch.object(sys, "frozen", True, create=True),
+            patch.object(sys, "_MEIPASS", str(tmp_path), create=True),
+        ):
             photo = load_tab_icon("test_icon", size=(16, 16))
             assert photo is not None
             assert photo.width() == 16

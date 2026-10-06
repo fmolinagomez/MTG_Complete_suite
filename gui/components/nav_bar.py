@@ -75,8 +75,18 @@ class NavBar(ttk.Frame):
             )
 
             # Activity labels
-            style.configure("NavActivity.TLabel", font=("Segoe UI", 9), foreground="#0066cc", background="#f8f9fa")
-            style.configure("NavSpinner.TLabel", font=("Segoe UI", 10, "bold"), foreground="#0066cc", background="#f8f9fa")
+            style.configure(
+                "NavActivity.TLabel",
+                font=("Segoe UI", 9),
+                foreground="#0066cc",
+                background="#f8f9fa",
+            )
+            style.configure(
+                "NavSpinner.TLabel",
+                font=("Segoe UI", 10, "bold"),
+                foreground="#0066cc",
+                background="#f8f9fa",
+            )
         except Exception as e:
             _log.debug("Could not configure ttk style for NavBar: %s", e)
 
@@ -133,7 +143,7 @@ class NavBar(ttk.Frame):
 
     def set_active_route(self, route: str) -> bool:
         """Update active route styling without triggering navigation callback.
-        
+
         Returns True if route exists and was activated, False otherwise.
         """
         if route not in self._buttons:

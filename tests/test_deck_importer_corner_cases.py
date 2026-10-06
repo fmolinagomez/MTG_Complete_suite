@@ -16,7 +16,7 @@ import pytest
 import requests
 
 from src.deck_importer import (
-    DeckCard,
+    _REGISTRY,
     DeckImportError,
     FetchedDeck,
     LorcanaDeckAdapter,
@@ -24,7 +24,6 @@ from src.deck_importer import (
     OnePieceDeckAdapter,
     RiftboundDeckAdapter,
     _astro_find,
-    _astro_val,
     _fetch_archidekt,
     _fetch_deckstats,
     _fetch_dreamborn,
@@ -42,12 +41,9 @@ from src.deck_importer import (
     _fetch_scryfall,
     _fetch_tappedout,
     _manabox_extract_props,
-    _REGISTRY,
     detect_game,
     fetch_deck,
-    get_adapter,
     parse_deck_list,
-    register_adapter,
 )
 
 
@@ -141,7 +137,9 @@ class TestLorcanaAdapterCornerCases:
 
     def test_fetch_deck_routing_and_unsupported(self):
         adapter = LorcanaDeckAdapter()
-        with patch("src.deck_importer._fetch_lorcana_gg", return_value=FetchedDeck("GG", [])) as m_gg:
+        with patch(
+            "src.deck_importer._fetch_lorcana_gg", return_value=FetchedDeck("GG", [])
+        ) as m_gg:
             adapter.fetch_deck("https://lorcana.gg/decks/my-deck/")
             m_gg.assert_called_once()
 
@@ -149,7 +147,9 @@ class TestLorcanaAdapterCornerCases:
             adapter.fetch_deck("https://inkdecks.com/lorcana-metagame/deck-98765")
             m_id.assert_called_once()
 
-        with patch("src.deck_importer._fetch_dreamborn", return_value=FetchedDeck("DB", [])) as m_db:
+        with patch(
+            "src.deck_importer._fetch_dreamborn", return_value=FetchedDeck("DB", [])
+        ) as m_db:
             adapter.fetch_deck("https://dreamborn.ink/decks/db-123")
             m_db.assert_called_once()
 
@@ -214,27 +214,39 @@ class TestOnePieceAdapterCornerCases:
 
     def test_fetch_deck_routing_and_unsupported(self):
         adapter = OnePieceDeckAdapter()
-        with patch("src.deck_importer._fetch_onepiece_gg", return_value=FetchedDeck("OPGG", [])) as m_opgg:
+        with patch(
+            "src.deck_importer._fetch_onepiece_gg", return_value=FetchedDeck("OPGG", [])
+        ) as m_opgg:
             adapter.fetch_deck("https://onepiece.gg/decks/zoro/")
             m_opgg.assert_called_once()
 
-        with patch("src.deck_importer._fetch_egman_op", return_value=FetchedDeck("Egman", [])) as m_eg:
+        with patch(
+            "src.deck_importer._fetch_egman_op", return_value=FetchedDeck("Egman", [])
+        ) as m_eg:
             adapter.fetch_deck("https://deckbuilder.egmanevents.com/?deck=OP01-001:1")
             m_eg.assert_called_once()
 
-        with patch("src.deck_importer._fetch_kaizoku_op", return_value=FetchedDeck("Kaizoku", [])) as m_kz:
+        with patch(
+            "src.deck_importer._fetch_kaizoku_op", return_value=FetchedDeck("Kaizoku", [])
+        ) as m_kz:
             adapter.fetch_deck("https://deckbuilder.cardkaizoku.com/?deck=OP01-001:1")
             m_kz.assert_called_once()
 
-        with patch("src.deck_importer._fetch_optopdecks", return_value=FetchedDeck("TopDecks", [])) as m_td:
+        with patch(
+            "src.deck_importer._fetch_optopdecks", return_value=FetchedDeck("TopDecks", [])
+        ) as m_td:
             adapter.fetch_deck("https://onepiecetopdecks.com/deck-list/test")
             m_td.assert_called_once()
 
-        with patch("src.deck_importer._fetch_gumgum", return_value=FetchedDeck("GumGum", [])) as m_gg:
+        with patch(
+            "src.deck_importer._fetch_gumgum", return_value=FetchedDeck("GumGum", [])
+        ) as m_gg:
             adapter.fetch_deck("https://gumgum.gg/decks/123")
             m_gg.assert_called_once()
 
-        with patch("src.deck_importer._fetch_limitless_op", return_value=FetchedDeck("Limitless", [])) as m_lim:
+        with patch(
+            "src.deck_importer._fetch_limitless_op", return_value=FetchedDeck("Limitless", [])
+        ) as m_lim:
             adapter.fetch_deck("https://limitlesstcg.com/decks/123")
             m_lim.assert_called_once()
 
@@ -291,10 +303,14 @@ class TestRiftboundAdapterCornerCases:
 
     def test_can_handle_url(self):
         adapter = RiftboundDeckAdapter()
-        assert adapter.can_handle_url("https://piltoverarchive.com/decks/view/00000000-0000-0000-0000-000000000001")
+        assert adapter.can_handle_url(
+            "https://piltoverarchive.com/decks/view/00000000-0000-0000-0000-000000000001"
+        )
         assert adapter.can_handle_url("https://riftmana.com/decks/test")
         assert adapter.can_handle_url("https://riftbinder.com/decks/test")
-        assert adapter.can_handle_url("https://riftdex.com/decks/00000000-0000-0000-0000-000000000001")
+        assert adapter.can_handle_url(
+            "https://riftdex.com/decks/00000000-0000-0000-0000-000000000001"
+        )
         assert adapter.can_handle_url("https://riftbound.gg/decks/test")
         assert not adapter.can_handle_url("https://moxfield.com/decks/1")
 
@@ -323,7 +339,9 @@ class TestRiftboundAdapterCornerCases:
         mock_rb_deck.cards = [mock_card]
 
         with patch("src.rb_scraper.scrape_deck", return_value=mock_rb_deck):
-            deck = adapter.fetch_deck("https://piltoverarchive.com/decks/view/00000000-0000-0000-0000-000000000001")
+            deck = adapter.fetch_deck(
+                "https://piltoverarchive.com/decks/view/00000000-0000-0000-0000-000000000001"
+            )
             assert deck.name == "Vi Beatdown"
             assert deck.game == "riftbound"
             assert len(deck.cards) == 1
@@ -430,7 +448,9 @@ class TestMtgPlatformFetchersCornerCases:
             assert deck.cards[1].name == "Valid Token"
 
     def test_archidekt_error_and_types_array(self):
-        with patch("src.deck_importer.requests.get", side_effect=requests.RequestException("Archidekt 500")):
+        with patch(
+            "src.deck_importer.requests.get", side_effect=requests.RequestException("Archidekt 500")
+        ):
             with pytest.raises(DeckImportError, match="Archidekt"):
                 _fetch_archidekt("bad_id")
 
@@ -495,7 +515,11 @@ class TestMtgPlatformFetchersCornerCases:
                 {
                     "count": 2,
                     "zone": "sideboard",
-                    "card_digest": {"name": "Flusterstorm", "set": "mh1", "collector_number": "255"},
+                    "card_digest": {
+                        "name": "Flusterstorm",
+                        "set": "mh1",
+                        "collector_number": "255",
+                    },
                 },
                 {"count": 1, "zone": "main", "card_digest": {"name": ""}},
             ],
@@ -512,12 +536,16 @@ class TestMtgPlatformFetchersCornerCases:
             assert deck.cards[1].name == "Flusterstorm"
             assert deck.cards[1].zone == "side"
 
-        with patch("src.deck_importer.requests.get", side_effect=requests.RequestException("Scryfall 500")):
+        with patch(
+            "src.deck_importer.requests.get", side_effect=requests.RequestException("Scryfall 500")
+        ):
             with pytest.raises(DeckImportError, match="Scryfall"):
                 _fetch_scryfall("bad-scryfall-id")
 
     def test_manabox_fetch_malformed_json_or_format(self):
-        with patch("src.deck_importer.requests.get", side_effect=requests.RequestException("Manabox 404")):
+        with patch(
+            "src.deck_importer.requests.get", side_effect=requests.RequestException("Manabox 404")
+        ):
             with pytest.raises(DeckImportError, match="Manabox"):
                 _fetch_manabox("bad_id")
 
@@ -542,7 +570,7 @@ class TestMtgPlatformFetchersCornerCases:
                 _fetch_manabox("no_cards_list")
 
     def test_manabox_extract_props_without_props_attribute(self):
-        html = '<div>&quot;cards&quot;: [] without props attribute</div>'
+        html = "<div>&quot;cards&quot;: [] without props attribute</div>"
         assert _manabox_extract_props(html) == ""
 
     def test_astro_find_in_list(self):
@@ -550,7 +578,10 @@ class TestMtgPlatformFetchersCornerCases:
         assert _astro_find(data, "target") == "found_value"
 
     def test_fetch_tappedout_network_error_and_cmdr(self):
-        with patch("src.deck_importer.requests.get", side_effect=requests.RequestException("TappedOut down")):
+        with patch(
+            "src.deck_importer.requests.get",
+            side_effect=requests.RequestException("TappedOut down"),
+        ):
             with pytest.raises(DeckImportError, match="TappedOut"):
                 _fetch_tappedout("burn-deck")
 
@@ -606,4 +637,3 @@ class TestMtgPlatformFetchersCornerCases:
             deck_kz = _fetch_kaizoku_op("https://deckbuilder.cardkaizoku.com/?deck=1")
             assert deck_kz.name == "Zoro Leader Deck"
             assert deck_kz.source == "kaizoku"
-

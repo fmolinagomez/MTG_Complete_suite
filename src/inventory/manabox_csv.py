@@ -99,7 +99,9 @@ def parse_manabox_csv(source: Path | str | io.TextIOBase) -> list[InventoryCard]
         except ValueError:
             quantity = 1
 
-        raw_foil = get_field(row, "Foil", "Foil / Etched", "Finish", "Is Foil", "Foil/Etched", default="")
+        raw_foil = get_field(
+            row, "Foil", "Foil / Etched", "Finish", "Is Foil", "Foil/Etched", default=""
+        )
         is_foil = raw_foil.lower() in FOIL_VALUES
 
         condition = get_field(row, "Condition", "Card Condition", default="NM")

@@ -25,7 +25,7 @@ _SCRYFALL_HEADERS = {"User-Agent": "MPCFillToPDF/2.0", "Accept": "application/js
 
 def sanitize_filename(name: str) -> str:
     """Sanitize card name or identifier for safe filesystem cache storage."""
-    cleaned = re.sub(r'[^\w\-.]+', "_", name.strip())
+    cleaned = re.sub(r"[^\w\-.]+", "_", name.strip())
     return re.sub(r"_+", "_", cleaned).strip("_")
 
 
@@ -58,7 +58,9 @@ def resolve_preview_cache_path(
     return p_dir / f"preview_unknown_{suffix}.jpg"
 
 
-def create_placeholder_image(text: str, width: int = _PREVIEW_W, height: int = _PREVIEW_H) -> ImageTk.PhotoImage:
+def create_placeholder_image(
+    text: str, width: int = _PREVIEW_W, height: int = _PREVIEW_H
+) -> ImageTk.PhotoImage:
     """Create a default placeholder PhotoImage with text."""
     img = Image.new("RGBA", (width, height), "#2b2b2b")
     draw = ImageDraw.Draw(img)
@@ -210,9 +212,13 @@ class CardHoverPreview:
     def attach_to_widget(
         self,
         widget: tk.Widget,
-        card_info_or_resolver: CardPreviewInfo | dict | str | Callable[[tk.Event], CardPreviewInfo | dict | str | None],
+        card_info_or_resolver: CardPreviewInfo
+        | dict
+        | str
+        | Callable[[tk.Event], CardPreviewInfo | dict | str | None],
     ) -> None:
         """Attach hover preview listener to a standard Tkinter widget."""
+
         def _get_info(event: tk.Event) -> CardPreviewInfo | None:
             if callable(card_info_or_resolver):
                 raw = card_info_or_resolver(event)
@@ -280,7 +286,9 @@ class CardHoverPreview:
             self._back_label = None
             self._header_label = None
 
-    def show_preview(self, info: CardPreviewInfo, x_root: int, y_root: int, req_id: int | None = None) -> None:
+    def show_preview(
+        self, info: CardPreviewInfo, x_root: int, y_root: int, req_id: int | None = None
+    ) -> None:
         """Display the preview tooltip immediately and initiate image loading."""
         if req_id is None:
             self._cancel_scheduled()
@@ -397,7 +405,9 @@ class CardHoverPreview:
 
         # 3. Not cached: show loading placeholder and download asynchronously
         target_label.configure(image=self._get_loading_photo())
-        self._executor.submit(self._async_fetch_and_cache, info, suffix, cache_path, mem_key, req_id)
+        self._executor.submit(
+            self._async_fetch_and_cache, info, suffix, cache_path, mem_key, req_id
+        )
 
     def _async_fetch_and_cache(
         self,
@@ -423,7 +433,9 @@ class CardHoverPreview:
                 img.thumbnail((_PREVIEW_W, _PREVIEW_H), Image.LANCZOS)
 
             def _apply_success() -> None:
-                if req_id != self._active_request_id or not (self._tip and self._tip.winfo_exists()):
+                if req_id != self._active_request_id or not (
+                    self._tip and self._tip.winfo_exists()
+                ):
                     return
                 try:
                     photo = ImageTk.PhotoImage(img)
@@ -440,10 +452,14 @@ class CardHoverPreview:
                 pass
 
         except Exception as e:
-            _log.debug("Error fetching Scryfall preview image for %s (%s): %s", info.name, suffix, e)
+            _log.debug(
+                "Error fetching Scryfall preview image for %s (%s): %s", info.name, suffix, e
+            )
 
             def _apply_error() -> None:
-                if req_id != self._active_request_id or not (self._tip and self._tip.winfo_exists()):
+                if req_id != self._active_request_id or not (
+                    self._tip and self._tip.winfo_exists()
+                ):
                     return
                 target = self._front_label if suffix == "front" else self._back_label
                 if target and target.winfo_exists():

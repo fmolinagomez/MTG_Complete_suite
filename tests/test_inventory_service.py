@@ -120,10 +120,26 @@ class TestInventoryService:
         assert service.get_card_by_id(card_id) is None
 
     def test_deck_registration_and_retrieval(self, service: InventoryService):
-        deck = DeckRecord(name="Urza Power", source_url="https://moxfield.com/decks/123", format="Commander")
+        deck = DeckRecord(
+            name="Urza Power", source_url="https://moxfield.com/decks/123", format="Commander"
+        )
         cards = [
-            DeckCardEntry(deck_id=0, oracle_id="orc-1", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=1),
-            DeckCardEntry(deck_id=0, oracle_id="orc-2", name="Island", set_code="unf", collector_number="236", quantity_required=30),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-1",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity_required=1,
+            ),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-2",
+                name="Island",
+                set_code="unf",
+                collector_number="236",
+                quantity_required=30,
+            ),
         ]
 
         deck_id = service.register_deck(deck, cards)
@@ -149,17 +165,47 @@ class TestInventoryService:
         # - 10 physical Islands
         # - 0 Mana Crypts
         service.add_or_update_card(
-            InventoryCard(oracle_id="orc-sol", name="Sol Ring", set_code="c21", collector_number="263", quantity=2, is_proxy=False)
+            InventoryCard(
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity=2,
+                is_proxy=False,
+            )
         )
         service.add_or_update_card(
-            InventoryCard(oracle_id="orc-island", name="Island", set_code="dom", collector_number="257", quantity=10, is_proxy=False)
+            InventoryCard(
+                oracle_id="orc-island",
+                name="Island",
+                set_code="dom",
+                collector_number="257",
+                quantity=10,
+                is_proxy=False,
+            )
         )
 
         # Deck 1 is already registered and uses 1 physical Sol Ring and 5 physical Islands
         deck1 = DeckRecord(name="Deck 1")
         deck1_cards = [
-            DeckCardEntry(deck_id=0, oracle_id="orc-sol", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=1, is_proxy=False),
-            DeckCardEntry(deck_id=0, oracle_id="orc-island", name="Island", set_code="dom", collector_number="257", quantity_required=5, is_proxy=False),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity_required=1,
+                is_proxy=False,
+            ),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-island",
+                name="Island",
+                set_code="dom",
+                collector_number="257",
+                quantity_required=5,
+                is_proxy=False,
+            ),
         ]
         service.register_deck(deck1, deck1_cards)
 
@@ -168,9 +214,30 @@ class TestInventoryService:
         # - 8 Islands (5 remaining available -> 5 owned, 3 missing proxies)
         # - 1 Mana Crypt (0 available -> 0 owned, 1 missing proxy)
         deck2_requirements = [
-            DeckCardEntry(deck_id=0, oracle_id="orc-sol", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=2),
-            DeckCardEntry(deck_id=0, oracle_id="orc-island", name="Island", set_code="dom", collector_number="257", quantity_required=8),
-            DeckCardEntry(deck_id=0, oracle_id="orc-crypt", name="Mana Crypt", set_code="2xm", collector_number="270", quantity_required=1),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity_required=2,
+            ),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-island",
+                name="Island",
+                set_code="dom",
+                collector_number="257",
+                quantity_required=8,
+            ),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-crypt",
+                name="Mana Crypt",
+                set_code="2xm",
+                collector_number="270",
+                quantity_required=1,
+            ),
         ]
 
         plan = service.calculate_missing_proxies(deck2_requirements, allocate_mode="exclusive")
@@ -204,8 +271,22 @@ class TestInventoryService:
     def test_import_deck_cards_to_inventory(self, service: InventoryService):
         deck = DeckRecord(name="Proxy Export Deck")
         cards = [
-            DeckCardEntry(deck_id=0, oracle_id="orc-1", name="Mox Diamond", set_code="tpr", collector_number="228", quantity_required=1),
-            DeckCardEntry(deck_id=0, oracle_id="orc-2", name="Chrome Mox", set_code="2xm", collector_number="240", quantity_required=2),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-1",
+                name="Mox Diamond",
+                set_code="tpr",
+                collector_number="228",
+                quantity_required=1,
+            ),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-2",
+                name="Chrome Mox",
+                set_code="2xm",
+                collector_number="240",
+                quantity_required=2,
+            ),
         ]
         deck_id = service.register_deck(deck, cards)
 
@@ -219,10 +300,24 @@ class TestInventoryService:
 
     def test_get_inventory_stats(self, service: InventoryService):
         service.add_or_update_card(
-            InventoryCard(oracle_id="orc-1", name="Sol Ring", set_code="c21", collector_number="263", quantity=2, is_proxy=False)
+            InventoryCard(
+                oracle_id="orc-1",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity=2,
+                is_proxy=False,
+            )
         )
         service.add_or_update_card(
-            InventoryCard(oracle_id="orc-2", name="Black Lotus", set_code="lea", collector_number="232", quantity=1, is_proxy=True)
+            InventoryCard(
+                oracle_id="orc-2",
+                name="Black Lotus",
+                set_code="lea",
+                collector_number="232",
+                quantity=1,
+                is_proxy=True,
+            )
         )
 
         deck = DeckRecord(name="Commander 1")
@@ -241,19 +336,45 @@ class TestInventoryService:
 
         # Add cards with different set codes, some duplicate and lower/upper case, some empty
         service.add_or_update_card(
-            InventoryCard(oracle_id="orc-1", name="Sol Ring", set_code="c21", collector_number="263", quantity=1)
+            InventoryCard(
+                oracle_id="orc-1",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity=1,
+            )
         )
         service.add_or_update_card(
-            InventoryCard(oracle_id="orc-2", name="Mana Crypt", set_code="2xm", collector_number="270", quantity=1)
+            InventoryCard(
+                oracle_id="orc-2",
+                name="Mana Crypt",
+                set_code="2xm",
+                collector_number="270",
+                quantity=1,
+            )
         )
         service.add_or_update_card(
-            InventoryCard(oracle_id="orc-3", name="Black Lotus", set_code="LEA", collector_number="232", quantity=1)
+            InventoryCard(
+                oracle_id="orc-3",
+                name="Black Lotus",
+                set_code="LEA",
+                collector_number="232",
+                quantity=1,
+            )
         )
         service.add_or_update_card(
-            InventoryCard(oracle_id="orc-4", name="Forest", set_code="c21", collector_number="400", quantity=1)
+            InventoryCard(
+                oracle_id="orc-4", name="Forest", set_code="c21", collector_number="400", quantity=1
+            )
         )
         service.add_or_update_card(
-            InventoryCard(oracle_id="orc-5", name="Unknown Token", set_code="", collector_number="1", quantity=1)
+            InventoryCard(
+                oracle_id="orc-5",
+                name="Unknown Token",
+                set_code="",
+                collector_number="1",
+                quantity=1,
+            )
         )
 
         codes = service.get_unique_set_codes()
@@ -266,14 +387,38 @@ class TestInventoryService:
         # Register two decks
         deck1 = DeckRecord(name="Deck Alpha", format="Commander")
         deck1_cards = [
-            DeckCardEntry(deck_id=0, oracle_id="orc-sol", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=1, is_proxy=False),
-            DeckCardEntry(deck_id=0, oracle_id="orc-island", name="Island", set_code="dom", collector_number="257", quantity_required=10, is_proxy=False),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity_required=1,
+                is_proxy=False,
+            ),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-island",
+                name="Island",
+                set_code="dom",
+                collector_number="257",
+                quantity_required=10,
+                is_proxy=False,
+            ),
         ]
         deck1_id = service.register_deck(deck1, deck1_cards)
 
         deck2 = DeckRecord(name="Deck Beta", format="Modern")
         deck2_cards = [
-            DeckCardEntry(deck_id=0, oracle_id="orc-sol", name="Sol Ring", set_code="2xm", collector_number="270", quantity_required=1, is_proxy=True),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="2xm",
+                collector_number="270",
+                quantity_required=1,
+                is_proxy=True,
+            ),
         ]
         deck2_id = service.register_deck(deck2, deck2_cards)
 
@@ -340,8 +485,24 @@ class TestInventoryService:
         # Register deck using 1 Sol Ring and 10 Islands
         deck = DeckRecord(name="Test Deck")
         deck_cards = [
-            DeckCardEntry(deck_id=0, oracle_id="orc-sol", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=1, is_proxy=False),
-            DeckCardEntry(deck_id=0, oracle_id="orc-island", name="Island", set_code="dom", collector_number="257", quantity_required=10, is_proxy=False),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity_required=1,
+                is_proxy=False,
+            ),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-island",
+                name="Island",
+                set_code="dom",
+                collector_number="257",
+                quantity_required=10,
+                is_proxy=False,
+            ),
         ]
         service.register_deck(deck, deck_cards)
 
@@ -417,13 +578,34 @@ class TestInventoryService:
         # - 1x Arcane Signet (eld, 331)
         # - 0x Mana Vault
         service.add_or_update_card(
-            InventoryCard(oracle_id="orc-sol", name="Sol Ring", set_code="c21", collector_number="263", quantity=2, is_proxy=False)
+            InventoryCard(
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity=2,
+                is_proxy=False,
+            )
         )
         service.add_or_update_card(
-            InventoryCard(oracle_id="orc-sol", name="Sol Ring", set_code="2xm", collector_number="270", quantity=1, is_proxy=False)
+            InventoryCard(
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="2xm",
+                collector_number="270",
+                quantity=1,
+                is_proxy=False,
+            )
         )
         service.add_or_update_card(
-            InventoryCard(oracle_id="orc-signet", name="Arcane Signet", set_code="eld", collector_number="331", quantity=1, is_proxy=False)
+            InventoryCard(
+                oracle_id="orc-signet",
+                name="Arcane Signet",
+                set_code="eld",
+                collector_number="331",
+                quantity=1,
+                is_proxy=False,
+            )
         )
 
         # Requirement 1: 2x Sol Ring (c21, 263) -> status: exact (exact_stock=2, needed=2)
@@ -431,13 +613,43 @@ class TestInventoryService:
         # Requirement 3: 2x Arcane Signet (eld, 331) -> status: partial (exact_stock=1, needed=2)
         # Requirement 4: 1x Mana Vault (uma, 229) -> status: missing (exact_stock=0, alt_stock=0)
         deck_requirements = [
-            DeckCardEntry(deck_id=0, oracle_id="orc-sol", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=2),
-            DeckCardEntry(deck_id=0, oracle_id="orc-sol", name="Sol Ring", set_code="lea", collector_number="100", quantity_required=1),
-            DeckCardEntry(deck_id=0, oracle_id="orc-signet", name="Arcane Signet", set_code="eld", collector_number="331", quantity_required=2),
-            DeckCardEntry(deck_id=0, oracle_id="orc-vault", name="Mana Vault", set_code="uma", collector_number="229", quantity_required=1),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity_required=2,
+            ),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="lea",
+                collector_number="100",
+                quantity_required=1,
+            ),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-signet",
+                name="Arcane Signet",
+                set_code="eld",
+                collector_number="331",
+                quantity_required=2,
+            ),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-vault",
+                name="Mana Vault",
+                set_code="uma",
+                collector_number="229",
+                quantity_required=1,
+            ),
         ]
 
-        details, total_exact, total_alt, total_missing = service.analyze_deck_card_matches(deck_requirements)
+        details, total_exact, total_alt, total_missing = service.analyze_deck_card_matches(
+            deck_requirements
+        )
 
         assert len(details) == 4
         assert isinstance(details[0], DeckCardMatchDetail)
@@ -483,22 +695,46 @@ class TestInventoryService:
     def test_analyze_deck_card_matches_with_other_decks_option_c(self, service: InventoryService):
         # Stock: 2 physical Sol Rings (c21, 263)
         service.add_or_update_card(
-            InventoryCard(oracle_id="orc-sol", name="Sol Ring", set_code="c21", collector_number="263", quantity=2, is_proxy=False)
+            InventoryCard(
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity=2,
+                is_proxy=False,
+            )
         )
 
         # Registered Deck 1 uses 1 physical Sol Ring
         deck1 = DeckRecord(name="Deck 1")
         deck1_cards = [
-            DeckCardEntry(deck_id=0, oracle_id="orc-sol", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=1, is_proxy=False),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity_required=1,
+                is_proxy=False,
+            ),
         ]
         deck1_id = service.register_deck(deck1, deck1_cards)
 
         # Evaluating Deck 2 (requires 2 Sol Rings):
         deck2_reqs = [
-            DeckCardEntry(deck_id=0, oracle_id="orc-sol", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=2),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity_required=2,
+            ),
         ]
         # Option C deducts Deck 1's physical card -> 1 available
-        details, exact, alt, missing = service.analyze_deck_card_matches(deck2_reqs, current_deck_id=None)
+        details, exact, alt, missing = service.analyze_deck_card_matches(
+            deck2_reqs, current_deck_id=None
+        )
         assert details[0].exact_stock == 1
         assert details[0].status == "partial"
         assert exact == 1
@@ -506,7 +742,9 @@ class TestInventoryService:
         assert missing == 1
 
         # Re-evaluating Deck 1 with current_deck_id=deck1_id -> Deck 1 sees full 2 stock available
-        details_d1, exact_d1, alt_d1, missing_d1 = service.analyze_deck_card_matches(deck1_cards, current_deck_id=deck1_id)
+        details_d1, exact_d1, alt_d1, missing_d1 = service.analyze_deck_card_matches(
+            deck1_cards, current_deck_id=deck1_id
+        )
         assert details_d1[0].exact_stock == 2
         assert details_d1[0].status == "exact"
         assert exact_d1 == 1
@@ -516,23 +754,63 @@ class TestInventoryService:
     def test_moxfield_deck_matches_inventory_proxies(self, service: InventoryService):
         # User inventory has 1 Sol Ring and 1 Arcane Signet marked as is_proxy=True
         service.add_or_update_card(
-            InventoryCard(oracle_id="", name="Sol Ring", set_code="c21", collector_number="263", quantity=1, is_proxy=True)
+            InventoryCard(
+                oracle_id="",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity=1,
+                is_proxy=True,
+            )
         )
         service.add_or_update_card(
-            InventoryCard(oracle_id="", name="Arcane Signet", set_code="eld", collector_number="331", quantity=1, is_proxy=True)
+            InventoryCard(
+                oracle_id="",
+                name="Arcane Signet",
+                set_code="eld",
+                collector_number="331",
+                quantity=1,
+                is_proxy=True,
+            )
         )
 
         # Deck loaded from Moxfield requires Sol Ring (exact) and Arcane Signet (alt edition) and Mana Crypt (missing)
         deck_cards = [
-            DeckCardEntry(deck_id=0, oracle_id="", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=1, is_proxy=False),
-            DeckCardEntry(deck_id=0, oracle_id="", name="Arcane Signet", set_code="cmm", collector_number="657", quantity_required=1, is_proxy=False),
-            DeckCardEntry(deck_id=0, oracle_id="", name="Mana Crypt", set_code="2xm", collector_number="270", quantity_required=1, is_proxy=False),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity_required=1,
+                is_proxy=False,
+            ),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="",
+                name="Arcane Signet",
+                set_code="cmm",
+                collector_number="657",
+                quantity_required=1,
+                is_proxy=False,
+            ),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="",
+                name="Mana Crypt",
+                set_code="2xm",
+                collector_number="270",
+                quantity_required=1,
+                is_proxy=False,
+            ),
         ]
 
         # With include_proxies=True (default)
-        details, exact, alt, missing = service.analyze_deck_card_matches(deck_cards, include_proxies=True)
+        details, exact, alt, missing = service.analyze_deck_card_matches(
+            deck_cards, include_proxies=True
+        )
         assert exact == 1  # Sol Ring exact
-        assert alt == 1    # Arcane Signet alt
+        assert alt == 1  # Arcane Signet alt
         assert missing == 1  # Mana Crypt missing
         assert details[0].status == "exact"
         assert details[1].status == "alternative"
@@ -544,7 +822,9 @@ class TestInventoryService:
         assert plan.missing_cards[0].name == "Mana Crypt"
 
         # With include_proxies=False (physical only)
-        details_phys, exact_phys, alt_phys, missing_phys = service.analyze_deck_card_matches(deck_cards, include_proxies=False)
+        details_phys, exact_phys, alt_phys, missing_phys = service.analyze_deck_card_matches(
+            deck_cards, include_proxies=False
+        )
         assert exact_phys == 0
         assert alt_phys == 0
         assert missing_phys == 3
@@ -552,25 +832,69 @@ class TestInventoryService:
     def test_double_faced_and_apostrophe_resilient_matching(self, service: InventoryService):
         # Inventory has cards with front-face only, curly apostrophe, and numeric collector numbers
         service.add_or_update_card(
-            InventoryCard(oracle_id="", name="Delver of Secrets", set_code="isd", collector_number="51", quantity=1, is_proxy=False)
+            InventoryCard(
+                oracle_id="",
+                name="Delver of Secrets",
+                set_code="isd",
+                collector_number="51",
+                quantity=1,
+                is_proxy=False,
+            )
         )
         service.add_or_update_card(
-            InventoryCard(oracle_id="", name="Urza's Tower", set_code="2xm", collector_number="331", quantity=1, is_proxy=False)
+            InventoryCard(
+                oracle_id="",
+                name="Urza's Tower",
+                set_code="2xm",
+                collector_number="331",
+                quantity=1,
+                is_proxy=False,
+            )
         )
         service.add_or_update_card(
-            InventoryCard(oracle_id="", name="Lightning Bolt", set_code="m11", collector_number="149", quantity=1, is_proxy=False)
+            InventoryCard(
+                oracle_id="",
+                name="Lightning Bolt",
+                set_code="m11",
+                collector_number="149",
+                quantity=1,
+                is_proxy=False,
+            )
         )
 
         deck_cards = [
             # Moxfield style: front // back name
-            DeckCardEntry(deck_id=0, oracle_id="", name="Delver of Secrets // Insectile Aberration", set_code="isd", collector_number="51", quantity_required=1),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="",
+                name="Delver of Secrets // Insectile Aberration",
+                set_code="isd",
+                collector_number="51",
+                quantity_required=1,
+            ),
             # Moxfield style: smart apostrophe
-            DeckCardEntry(deck_id=0, oracle_id="", name="Urza’s Tower", set_code="2xm", collector_number="331", quantity_required=1),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="",
+                name="Urza’s Tower",
+                set_code="2xm",
+                collector_number="331",
+                quantity_required=1,
+            ),
             # Leading zero in collector number
-            DeckCardEntry(deck_id=0, oracle_id="", name="Lightning Bolt", set_code="m11", collector_number="0149", quantity_required=1),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="",
+                name="Lightning Bolt",
+                set_code="m11",
+                collector_number="0149",
+                quantity_required=1,
+            ),
         ]
 
-        details, exact, alt, missing = service.analyze_deck_card_matches(deck_cards, include_proxies=True)
+        details, exact, alt, missing = service.analyze_deck_card_matches(
+            deck_cards, include_proxies=True
+        )
         assert exact == 3
         assert alt == 0
         assert missing == 0
@@ -578,13 +902,19 @@ class TestInventoryService:
 
     def test_batch_delete_cards(self, service: InventoryService):
         id1 = service.add_or_update_card(
-            InventoryCard(oracle_id="1", name="Card 1", set_code="set", collector_number="1", quantity=1)
+            InventoryCard(
+                oracle_id="1", name="Card 1", set_code="set", collector_number="1", quantity=1
+            )
         )
         id2 = service.add_or_update_card(
-            InventoryCard(oracle_id="2", name="Card 2", set_code="set", collector_number="2", quantity=1)
+            InventoryCard(
+                oracle_id="2", name="Card 2", set_code="set", collector_number="2", quantity=1
+            )
         )
         id3 = service.add_or_update_card(
-            InventoryCard(oracle_id="3", name="Card 3", set_code="set", collector_number="3", quantity=1)
+            InventoryCard(
+                oracle_id="3", name="Card 3", set_code="set", collector_number="3", quantity=1
+            )
         )
 
         assert service.batch_delete_cards([]) == 0
@@ -599,27 +929,66 @@ class TestInventoryService:
 
     def test_check_cards_in_decks(self, service: InventoryService):
         id1 = service.add_or_update_card(
-            InventoryCard(oracle_id="orc-1", name="Sol Ring", set_code="c21", collector_number="263", quantity=2)
+            InventoryCard(
+                oracle_id="orc-1",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity=2,
+            )
         )
         id2 = service.add_or_update_card(
-            InventoryCard(oracle_id="orc-2", name="Command Tower", set_code="cmr", collector_number="350", quantity=1)
+            InventoryCard(
+                oracle_id="orc-2",
+                name="Command Tower",
+                set_code="cmr",
+                collector_number="350",
+                quantity=1,
+            )
         )
         id3 = service.add_or_update_card(
-            InventoryCard(oracle_id="orc-3", name="Forest", set_code="neo", collector_number="300", quantity=10)
+            InventoryCard(
+                oracle_id="orc-3",
+                name="Forest",
+                set_code="neo",
+                collector_number="300",
+                quantity=10,
+            )
         )
 
         # Register deck using Sol Ring and Command Tower
         deck = DeckRecord(name="Ur-Dragon Commander", format="Commander")
         deck_cards = [
-            DeckCardEntry(deck_id=0, oracle_id="orc-1", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=1),
-            DeckCardEntry(deck_id=0, oracle_id="orc-2", name="Command Tower", set_code="cmr", collector_number="350", quantity_required=1),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-1",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity_required=1,
+            ),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-2",
+                name="Command Tower",
+                set_code="cmr",
+                collector_number="350",
+                quantity_required=1,
+            ),
         ]
         service.register_deck(deck, deck_cards)
 
         # Register second deck using Sol Ring only
         deck2 = DeckRecord(name="Atraxa Superfriends", format="Commander")
         deck_cards2 = [
-            DeckCardEntry(deck_id=0, oracle_id="orc-1", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=1),
+            DeckCardEntry(
+                deck_id=0,
+                oracle_id="orc-1",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity_required=1,
+            ),
         ]
         service.register_deck(deck2, deck_cards2)
 
@@ -630,10 +999,26 @@ class TestInventoryService:
 
     def test_batch_update_cards_simple(self, service: InventoryService):
         id1 = service.add_or_update_card(
-            InventoryCard(oracle_id="1", name="Card 1", set_code="abc", collector_number="1", quantity=2, condition="NM", language="en")
+            InventoryCard(
+                oracle_id="1",
+                name="Card 1",
+                set_code="abc",
+                collector_number="1",
+                quantity=2,
+                condition="NM",
+                language="en",
+            )
         )
         id2 = service.add_or_update_card(
-            InventoryCard(oracle_id="2", name="Card 2", set_code="abc", collector_number="2", quantity=3, condition="NM", language="en")
+            InventoryCard(
+                oracle_id="2",
+                name="Card 2",
+                set_code="abc",
+                collector_number="2",
+                quantity=3,
+                condition="NM",
+                language="en",
+            )
         )
 
         count = service.batch_update_cards(
@@ -659,11 +1044,25 @@ class TestInventoryService:
     def test_batch_update_cards_duplicate_merging(self, service: InventoryService):
         # Card 1: Physical Sol Ring (quantity 2)
         id_real = service.add_or_update_card(
-            InventoryCard(oracle_id="sol", name="Sol Ring", set_code="c21", collector_number="263", quantity=2, is_proxy=False)
+            InventoryCard(
+                oracle_id="sol",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity=2,
+                is_proxy=False,
+            )
         )
         # Card 2: Proxy Sol Ring (quantity 3)
         id_proxy = service.add_or_update_card(
-            InventoryCard(oracle_id="sol", name="Sol Ring", set_code="c21", collector_number="263", quantity=3, is_proxy=True)
+            InventoryCard(
+                oracle_id="sol",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity=3,
+                is_proxy=True,
+            )
         )
 
         # Batch update: change physical card to proxy
@@ -679,10 +1078,14 @@ class TestInventoryService:
 
     def test_batch_assign_to_deck(self, service: InventoryService):
         id1 = service.add_or_update_card(
-            InventoryCard(oracle_id="1", name="Card 1", set_code="set", collector_number="1", quantity=3)
+            InventoryCard(
+                oracle_id="1", name="Card 1", set_code="set", collector_number="1", quantity=3
+            )
         )
         id2 = service.add_or_update_card(
-            InventoryCard(oracle_id="2", name="Card 2", set_code="set", collector_number="2", quantity=2)
+            InventoryCard(
+                oracle_id="2", name="Card 2", set_code="set", collector_number="2", quantity=2
+            )
         )
 
         deck_id = service.register_deck(DeckRecord(name="Test Deck"), cards=[])
@@ -705,6 +1108,3 @@ class TestInventoryService:
         assert deck_info2 is not None
         c1 = next(c for c in deck_info2[1] if c.set_code == "set" and c.collector_number == "1")
         assert c1.quantity_required == 2
-
-
-

@@ -54,7 +54,9 @@ class InventoryService:
 
         clean_query = query.strip()
         if clean_query:
-            clauses.append("(name LIKE ? OR set_code LIKE ? OR oracle_id LIKE ? OR collector_number LIKE ?)")
+            clauses.append(
+                "(name LIKE ? OR set_code LIKE ? OR oracle_id LIKE ? OR collector_number LIKE ?)"
+            )
             param_str = f"%{clean_query}%"
             params.extend([param_str, param_str, param_str, param_str])
 
@@ -116,7 +118,9 @@ class InventoryService:
         """Insert or update a card in the inventory database."""
         with get_db(self.db_path) as conn:
             if card.id is not None:
-                existing = conn.execute("SELECT id FROM inventory_cards WHERE id = ?", (card.id,)).fetchone()
+                existing = conn.execute(
+                    "SELECT id FROM inventory_cards WHERE id = ?", (card.id,)
+                ).fetchone()
                 if existing:
                     conn.execute(
                         """
@@ -420,7 +424,9 @@ class InventoryService:
                         """,
                         (card["oracle_id"], card["name"]),
                     ).fetchone()
-                    used = int(usages["total_used"] or 0) if (usages and usages["total_used"]) else 0
+                    used = (
+                        int(usages["total_used"] or 0) if (usages and usages["total_used"]) else 0
+                    )
                     copies = max(1, card["quantity"] - used)
                 elif isinstance(copies_mode, int):
                     copies = max(1, copies_mode)
@@ -461,7 +467,6 @@ class InventoryService:
                 assigned_count += 1
 
         return assigned_count
-
 
     def get_all_decks(self) -> list[DeckRecord]:
         """Fetch all registered decks."""
@@ -640,7 +645,9 @@ class InventoryService:
             return MissingProxyPlan()
 
         with get_db(self.db_path) as conn:
-            where_sql = "WHERE quantity > 0" if include_proxies else "WHERE is_proxy = 0 AND quantity > 0"
+            where_sql = (
+                "WHERE quantity > 0" if include_proxies else "WHERE is_proxy = 0 AND quantity > 0"
+            )
             rows = conn.execute(
                 f"""
                 SELECT id, oracle_id, name, set_code, collector_number, quantity,
@@ -676,7 +683,9 @@ class InventoryService:
                     deck_filter_clauses.append("deck_id != ?")
                     deck_params.append(current_deck_id)
 
-                deck_filter_sql = f"WHERE {' AND '.join(deck_filter_clauses)}" if deck_filter_clauses else ""
+                deck_filter_sql = (
+                    f"WHERE {' AND '.join(deck_filter_clauses)}" if deck_filter_clauses else ""
+                )
 
                 assigned_rows = conn.execute(
                     f"""
@@ -765,7 +774,9 @@ class InventoryService:
     def get_inventory_stats(self) -> dict[str, int]:
         """Fetch high-level collection metrics."""
         with get_db(self.db_path) as conn:
-            total_cards = conn.execute("SELECT COALESCE(SUM(quantity), 0) FROM inventory_cards").fetchone()[0]
+            total_cards = conn.execute(
+                "SELECT COALESCE(SUM(quantity), 0) FROM inventory_cards"
+            ).fetchone()[0]
             unique_oracle_ids = conn.execute(
                 "SELECT COUNT(DISTINCT oracle_id) FROM inventory_cards WHERE oracle_id != ''"
             ).fetchone()[0]
@@ -938,7 +949,9 @@ class InventoryService:
             return [], 0, 0, 0
 
         with get_db(self.db_path) as conn:
-            where_sql = "WHERE quantity > 0" if include_proxies else "WHERE is_proxy = 0 AND quantity > 0"
+            where_sql = (
+                "WHERE quantity > 0" if include_proxies else "WHERE is_proxy = 0 AND quantity > 0"
+            )
             rows = conn.execute(
                 f"""
                 SELECT id, oracle_id, name, set_code, collector_number, quantity,
@@ -973,7 +986,9 @@ class InventoryService:
                 deck_filter_clauses.append("deck_id != ?")
                 deck_params.append(current_deck_id)
 
-            deck_filter_sql = f"WHERE {' AND '.join(deck_filter_clauses)}" if deck_filter_clauses else ""
+            deck_filter_sql = (
+                f"WHERE {' AND '.join(deck_filter_clauses)}" if deck_filter_clauses else ""
+            )
 
             assigned_rows = conn.execute(
                 f"""
@@ -1010,4 +1025,3 @@ class InventoryService:
             current_deck_id=current_deck_id,
             include_proxies=include_proxies,
         )
-

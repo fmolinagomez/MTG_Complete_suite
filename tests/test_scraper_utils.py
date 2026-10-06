@@ -11,14 +11,13 @@ class TestSanitizeFilename:
         assert sanitize_filename("My Deck") == "My Deck"
 
     def test_removes_invalid_characters(self):
-        assert sanitize_filename("Deck: /\\*?\"<>| Name") == "Deck_ ________ Name"
+        assert sanitize_filename('Deck: /\\*?"<>| Name') == "Deck_ ________ Name"
 
     def test_strips_leading_trailing_spaces_and_dots(self):
         assert sanitize_filename(" . My Deck . ") == "My Deck"
 
     def test_empty_fallback(self):
         assert sanitize_filename("::???::") == "deck"
-
 
 
 class TestGenerateFallbackBack:
@@ -173,8 +172,6 @@ class TestFetchUtilities:
     def test_fetch_url_retry_after_header(self):
         from unittest.mock import MagicMock, patch
 
-        import requests
-
         from src.scraper_utils import fetch_url
 
         resp_429 = MagicMock()
@@ -238,8 +235,9 @@ class TestFetchUtilities:
 
     def test_resources_dir_frozen_and_dev(self, tmp_path):
         import sys
-        from unittest.mock import patch
         from pathlib import Path
+        from unittest.mock import patch
+
         from src.scraper_utils import resources_dir
 
         # Dev mode
@@ -247,8 +245,9 @@ class TestFetchUtilities:
         assert isinstance(res_dev, Path)
 
         # Frozen mode (.exe)
-        with patch.object(sys, "frozen", True, create=True), patch.object(sys, "_MEIPASS", str(tmp_path), create=True):
+        with (
+            patch.object(sys, "frozen", True, create=True),
+            patch.object(sys, "_MEIPASS", str(tmp_path), create=True),
+        ):
             res_frozen = resources_dir()
             assert res_frozen == tmp_path / "resources"
-
-

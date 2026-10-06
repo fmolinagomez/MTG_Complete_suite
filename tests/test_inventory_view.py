@@ -135,7 +135,13 @@ class TestInventoryDialogs:
 
     def test_card_decks_usage_dialog_with_usages(self, clean_root, inv_service):
         card_id = inv_service.add_or_update_card(
-            InventoryCard(oracle_id="orc-1", name="Sol Ring", set_code="c21", collector_number="263", quantity=2)
+            InventoryCard(
+                oracle_id="orc-1",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity=2,
+            )
         )
         card = inv_service.get_card_by_id(card_id)
         assert card is not None
@@ -171,7 +177,13 @@ class TestInventoryDialogs:
         dlg.destroy()
 
     def test_card_decks_usage_dialog_empty_usages(self, clean_root, inv_service):
-        card = InventoryCard(oracle_id="orc-unused", name="Unused Card", set_code="mh2", collector_number="10", quantity=1)
+        card = InventoryCard(
+            oracle_id="orc-unused",
+            name="Unused Card",
+            set_code="mh2",
+            collector_number="10",
+            quantity=1,
+        )
         dlg = CardDecksUsageDialog(clean_root, card, inv_service)
         assert dlg.lbl_empty is not None
         assert "Esta carta no está asignada a ningún mazo" in dlg.lbl_empty.cget("text")
@@ -213,8 +225,16 @@ class TestInventoryDialogs:
 
     def test_batch_assign_deck_dialog(self, clean_root):
         cards = [
-            InventoryCard(oracle_id="1", name="Sol Ring", set_code="c21", collector_number="263", quantity=2),
-            InventoryCard(oracle_id="2", name="Command Tower", set_code="cmr", collector_number="350", quantity=1),
+            InventoryCard(
+                oracle_id="1", name="Sol Ring", set_code="c21", collector_number="263", quantity=2
+            ),
+            InventoryCard(
+                oracle_id="2",
+                name="Command Tower",
+                set_code="cmr",
+                collector_number="350",
+                quantity=1,
+            ),
         ]
         decks = [DeckRecord(id=10, name="EDH Deck", format="Commander")]
 
@@ -244,7 +264,6 @@ class TestInventoryDialogs:
         assert dlg2.result["copies_mode"] == "available"
 
 
-
 # ---------------------------------------------------------------------------
 # Test InventoryView
 # ---------------------------------------------------------------------------
@@ -272,13 +291,37 @@ class TestInventoryView:
     def test_collection_refresh_and_filters(self, clean_root, inv_service, task_manager):
         # Seed test cards
         inv_service.add_or_update_card(
-            InventoryCard(oracle_id="1", name="Sol Ring", set_code="c21", collector_number="263", quantity=2, is_foil=False, is_proxy=False)
+            InventoryCard(
+                oracle_id="1",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity=2,
+                is_foil=False,
+                is_proxy=False,
+            )
         )
         inv_service.add_or_update_card(
-            InventoryCard(oracle_id="2", name="Mana Crypt", set_code="2xm", collector_number="270", quantity=1, is_foil=True, is_proxy=True)
+            InventoryCard(
+                oracle_id="2",
+                name="Mana Crypt",
+                set_code="2xm",
+                collector_number="270",
+                quantity=1,
+                is_foil=True,
+                is_proxy=True,
+            )
         )
         inv_service.add_or_update_card(
-            InventoryCard(oracle_id="3", name="Black Lotus", set_code="lea", collector_number="232", quantity=1, is_foil=True, is_proxy=False)
+            InventoryCard(
+                oracle_id="3",
+                name="Black Lotus",
+                set_code="lea",
+                collector_number="232",
+                quantity=1,
+                is_foil=True,
+                is_proxy=False,
+            )
         )
 
         view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
@@ -321,7 +364,9 @@ class TestInventoryView:
 
     def test_delete_card_action(self, clean_root, inv_service, task_manager):
         card_id = inv_service.add_or_update_card(
-            InventoryCard(oracle_id="", name="Mox Diamond", set_code="tpr", collector_number="228", quantity=1)
+            InventoryCard(
+                oracle_id="", name="Mox Diamond", set_code="tpr", collector_number="228", quantity=1
+            )
         )
 
         view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
@@ -344,7 +389,13 @@ class TestInventoryView:
         view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
         view.pack()
 
-        new_card = InventoryCard(oracle_id="", name="Birds of Paradise", set_code="rav", collector_number="153", quantity=4)
+        new_card = InventoryCard(
+            oracle_id="",
+            name="Birds of Paradise",
+            set_code="rav",
+            collector_number="153",
+            quantity=4,
+        )
 
         with patch.object(view, "wait_window"):
             with patch("gui.views.inventory_view.AddCardDialog") as mock_dlg_cls:
@@ -360,9 +411,17 @@ class TestInventoryView:
 
         view.destroy()
 
-    def test_double_click_and_view_decks_opens_usage_dialog(self, clean_root, inv_service, task_manager):
+    def test_double_click_and_view_decks_opens_usage_dialog(
+        self, clean_root, inv_service, task_manager
+    ):
         inv_service.add_or_update_card(
-            InventoryCard(oracle_id="orc-1", name="Sol Ring", set_code="c21", collector_number="263", quantity=1)
+            InventoryCard(
+                oracle_id="orc-1",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity=1,
+            )
         )
         view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
         view.pack()
@@ -390,7 +449,9 @@ class TestInventoryView:
 
     def test_advanced_filters_toggle_and_reset(self, clean_root, inv_service, task_manager):
         inv_service.add_or_update_card(
-            InventoryCard(oracle_id="1", name="Sol Ring", set_code="c21", collector_number="263", quantity=2)
+            InventoryCard(
+                oracle_id="1", name="Sol Ring", set_code="c21", collector_number="263", quantity=2
+            )
         )
         view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
         view.pack()
@@ -428,7 +489,13 @@ class TestInventoryView:
     def test_advanced_filters_by_usage(self, clean_root, inv_service, task_manager):
         # Card 1 assigned to a deck
         inv_service.add_or_update_card(
-            InventoryCard(oracle_id="orc-assigned", name="Arcane Signet", set_code="eld", collector_number="331", quantity=1)
+            InventoryCard(
+                oracle_id="orc-assigned",
+                name="Arcane Signet",
+                set_code="eld",
+                collector_number="331",
+                quantity=1,
+            )
         )
         inv_service.register_deck(
             DeckRecord(name="Test Deck"),
@@ -446,7 +513,13 @@ class TestInventoryView:
 
         # Card 2 free
         inv_service.add_or_update_card(
-            InventoryCard(oracle_id="orc-free", name="Free Spell", set_code="eld", collector_number="332", quantity=2)
+            InventoryCard(
+                oracle_id="orc-free",
+                name="Free Spell",
+                set_code="eld",
+                collector_number="332",
+                quantity=2,
+            )
         )
 
         view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
@@ -475,13 +548,34 @@ class TestInventoryView:
 
     def test_advanced_filters_by_set_and_rarity(self, clean_root, inv_service, task_manager):
         inv_service.add_or_update_card(
-            InventoryCard(oracle_id="1", name="Black Lotus", set_code="lea", collector_number="232", quantity=1, metadata_json='{"rarity": "rare"}')
+            InventoryCard(
+                oracle_id="1",
+                name="Black Lotus",
+                set_code="lea",
+                collector_number="232",
+                quantity=1,
+                metadata_json='{"rarity": "rare"}',
+            )
         )
         inv_service.add_or_update_card(
-            InventoryCard(oracle_id="2", name="Mox Diamond", set_code="tpr", collector_number="228", quantity=1, metadata_json='{"rarity": "mythic"}')
+            InventoryCard(
+                oracle_id="2",
+                name="Mox Diamond",
+                set_code="tpr",
+                collector_number="228",
+                quantity=1,
+                metadata_json='{"rarity": "mythic"}',
+            )
         )
         inv_service.add_or_update_card(
-            InventoryCard(oracle_id="3", name="Lightning Bolt", set_code="lea", collector_number="161", quantity=4, metadata_json='{"rarity": "common"}')
+            InventoryCard(
+                oracle_id="3",
+                name="Lightning Bolt",
+                set_code="lea",
+                collector_number="161",
+                quantity=4,
+                metadata_json='{"rarity": "common"}',
+            )
         )
 
         view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
@@ -504,13 +598,31 @@ class TestInventoryView:
 
     def test_column_sorting_numeric_and_text(self, clean_root, inv_service, task_manager):
         inv_service.add_or_update_card(
-            InventoryCard(oracle_id="1", name="Zendikar Resurgent", set_code="ogw", collector_number="147", quantity=10)
+            InventoryCard(
+                oracle_id="1",
+                name="Zendikar Resurgent",
+                set_code="ogw",
+                collector_number="147",
+                quantity=10,
+            )
         )
         inv_service.add_or_update_card(
-            InventoryCard(oracle_id="2", name="Abrupt Decay", set_code="rtr", collector_number="142", quantity=2)
+            InventoryCard(
+                oracle_id="2",
+                name="Abrupt Decay",
+                set_code="rtr",
+                collector_number="142",
+                quantity=2,
+            )
         )
         inv_service.add_or_update_card(
-            InventoryCard(oracle_id="3", name="Counterspell", set_code="ema", collector_number="43", quantity=5)
+            InventoryCard(
+                oracle_id="3",
+                name="Counterspell",
+                set_code="ema",
+                collector_number="43",
+                quantity=5,
+            )
         )
 
         view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
@@ -536,7 +648,9 @@ class TestInventoryView:
 
         view.destroy()
 
-    def test_manabox_csv_import_task_dispatch_and_callback(self, clean_root, inv_service, task_manager, tmp_path):
+    def test_manabox_csv_import_task_dispatch_and_callback(
+        self, clean_root, inv_service, task_manager, tmp_path
+    ):
         csv_file = tmp_path / "manabox.csv"
         csv_file.write_text("dummy csv")
 
@@ -566,7 +680,14 @@ class TestInventoryView:
     def test_deck_fetch_and_breakdown_display(self, clean_root, inv_service, task_manager):
         # 1. Add physical stock: 1 Sol Ring
         inv_service.add_or_update_card(
-            InventoryCard(oracle_id="orc-sol", name="Sol Ring", set_code="c21", collector_number="263", quantity=1, is_proxy=False)
+            InventoryCard(
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity=1,
+                is_proxy=False,
+            )
         )
 
         view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
@@ -577,8 +698,16 @@ class TestInventoryView:
             name="Test Commander",
             format="Commander",
             cards=[
-                DeckCard(name="Sol Ring", set_code="c21", collector_number="263", quantity=1, zone="main"),
-                DeckCard(name="Mana Vault", set_code="uma", collector_number="229", quantity=1, zone="main"),
+                DeckCard(
+                    name="Sol Ring", set_code="c21", collector_number="263", quantity=1, zone="main"
+                ),
+                DeckCard(
+                    name="Mana Vault",
+                    set_code="uma",
+                    collector_number="229",
+                    quantity=1,
+                    zone="main",
+                ),
             ],
         )
 
@@ -604,14 +733,22 @@ class TestInventoryView:
         assert len(rows) == 2
 
         # Sol Ring is owned (stock = 1, status = 🟢 Exacta)
-        sol_row = [view.deck_tree.item(r)["values"] for r in rows if "Sol Ring" in view.deck_tree.item(r)["values"][0]][0]
+        sol_row = [
+            view.deck_tree.item(r)["values"]
+            for r in rows
+            if "Sol Ring" in view.deck_tree.item(r)["values"][0]
+        ][0]
         assert sol_row[3] == 1  # required
         assert sol_row[5] == 1  # physical quantity
         assert sol_row[6] == 0  # proxy quantity
         assert "Exacta" in sol_row[7]
 
         # Mana Vault is missing (stock = 0, status = 🔴 Faltante (Proxy))
-        vault_row = [view.deck_tree.item(r)["values"] for r in rows if "Mana Vault" in view.deck_tree.item(r)["values"][0]][0]
+        vault_row = [
+            view.deck_tree.item(r)["values"]
+            for r in rows
+            if "Mana Vault" in view.deck_tree.item(r)["values"][0]
+        ][0]
         assert vault_row[3] == 1  # required
         assert vault_row[5] == 0  # physical quantity
         assert vault_row[6] == 1  # proxy quantity
@@ -634,19 +771,54 @@ class TestInventoryView:
     def test_deck_sync_breakdown_exact_and_alt_stock(self, clean_root, inv_service, task_manager):
         # Stock: 1 Sol Ring (c21 #263), 1 Sol Ring (lea #269), 0 Mana Crypt
         inv_service.add_or_update_card(
-            InventoryCard(oracle_id="orc-sol", name="Sol Ring", set_code="c21", collector_number="263", quantity=1, is_proxy=False)
+            InventoryCard(
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity=1,
+                is_proxy=False,
+            )
         )
         inv_service.add_or_update_card(
-            InventoryCard(oracle_id="orc-sol", name="Sol Ring", set_code="lea", collector_number="269", quantity=1, is_proxy=False)
+            InventoryCard(
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="lea",
+                collector_number="269",
+                quantity=1,
+                is_proxy=False,
+            )
         )
 
         # Register deck requiring 1 exact c21 Sol Ring, 1 commander alt Sol Ring, and 1 Mana Crypt
         deck_id = inv_service.register_deck(
             DeckRecord(name="Sync Test Deck", format="Commander"),
             [
-                DeckCardEntry(deck_id=0, oracle_id="orc-sol", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=1),
-                DeckCardEntry(deck_id=0, oracle_id="orc-sol", name="Sol Ring", set_code="cmd", collector_number="123", quantity_required=1),
-                DeckCardEntry(deck_id=0, oracle_id="orc-crypt", name="Mana Crypt", set_code="2xm", collector_number="270", quantity_required=1),
+                DeckCardEntry(
+                    deck_id=0,
+                    oracle_id="orc-sol",
+                    name="Sol Ring",
+                    set_code="c21",
+                    collector_number="263",
+                    quantity_required=1,
+                ),
+                DeckCardEntry(
+                    deck_id=0,
+                    oracle_id="orc-sol",
+                    name="Sol Ring",
+                    set_code="cmd",
+                    collector_number="123",
+                    quantity_required=1,
+                ),
+                DeckCardEntry(
+                    deck_id=0,
+                    oracle_id="orc-crypt",
+                    name="Mana Crypt",
+                    set_code="2xm",
+                    collector_number="270",
+                    quantity_required=1,
+                ),
             ],
         )
 
@@ -696,7 +868,14 @@ class TestInventoryView:
         deck_id = inv_service.register_deck(
             DeckRecord(name="Urza Deck"),
             [
-                DeckCardEntry(deck_id=0, oracle_id="", name="Island", set_code="unf", collector_number="236", quantity_required=10),
+                DeckCardEntry(
+                    deck_id=0,
+                    oracle_id="",
+                    name="Island",
+                    set_code="unf",
+                    collector_number="236",
+                    quantity_required=10,
+                ),
             ],
         )
 
@@ -722,11 +901,20 @@ class TestInventoryView:
 
         view.destroy()
 
-    def test_generate_missing_proxies_pdf_action(self, clean_root, inv_service, task_manager, tmp_path):
+    def test_generate_missing_proxies_pdf_action(
+        self, clean_root, inv_service, task_manager, tmp_path
+    ):
         deck_id = inv_service.register_deck(
             DeckRecord(name="Urza Deck"),
             [
-                DeckCardEntry(deck_id=0, oracle_id="", name="Mox Sapphire", set_code="lea", collector_number="265", quantity_required=1),
+                DeckCardEntry(
+                    deck_id=0,
+                    oracle_id="",
+                    name="Mox Sapphire",
+                    set_code="lea",
+                    collector_number="265",
+                    quantity_required=1,
+                ),
             ],
         )
 
@@ -737,7 +925,9 @@ class TestInventoryView:
         fake_pdf = tmp_path / "Urza_Deck_proxies.pdf"
         fake_pdf.write_text("fake pdf")
 
-        with patch.object(view, "_task_generate_missing_proxies_pdf", return_value=[fake_pdf]) as mock_gen:
+        with patch.object(
+            view, "_task_generate_missing_proxies_pdf", return_value=[fake_pdf]
+        ) as mock_gen:
             with patch("tkinter.messagebox.showinfo") as mock_info:
                 view._on_generate_missing_pdf_click()
 
@@ -769,12 +959,27 @@ class TestInventoryView:
     def test_deck_view_include_proxies_toggle(self, clean_root, inv_service, task_manager):
         # Add proxy card to inventory
         inv_service.add_or_update_card(
-            InventoryCard(oracle_id="", name="Sol Ring", set_code="c21", collector_number="263", quantity=1, is_proxy=True)
+            InventoryCard(
+                oracle_id="",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity=1,
+                is_proxy=True,
+            )
         )
         deck_id = inv_service.register_deck(
             DeckRecord(name="Proxy Test Deck"),
             [
-                DeckCardEntry(deck_id=0, oracle_id="", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=1, is_proxy=False),
+                DeckCardEntry(
+                    deck_id=0,
+                    oracle_id="",
+                    name="Sol Ring",
+                    set_code="c21",
+                    collector_number="263",
+                    quantity_required=1,
+                    is_proxy=False,
+                ),
             ],
         )
 
@@ -807,10 +1012,24 @@ class TestInventoryView:
 
         view.destroy()
 
-    def test_inventory_view_batch_selection_and_shortcuts(self, clean_root, inv_service, task_manager):
-        inv_service.add_or_update_card(InventoryCard(oracle_id="1", name="Card A", set_code="set", collector_number="1", quantity=2))
-        inv_service.add_or_update_card(InventoryCard(oracle_id="2", name="Card B", set_code="set", collector_number="2", quantity=3))
-        inv_service.add_or_update_card(InventoryCard(oracle_id="3", name="Card C", set_code="set", collector_number="3", quantity=1))
+    def test_inventory_view_batch_selection_and_shortcuts(
+        self, clean_root, inv_service, task_manager
+    ):
+        inv_service.add_or_update_card(
+            InventoryCard(
+                oracle_id="1", name="Card A", set_code="set", collector_number="1", quantity=2
+            )
+        )
+        inv_service.add_or_update_card(
+            InventoryCard(
+                oracle_id="2", name="Card B", set_code="set", collector_number="2", quantity=3
+            )
+        )
+        inv_service.add_or_update_card(
+            InventoryCard(
+                oracle_id="3", name="Card C", set_code="set", collector_number="3", quantity=1
+            )
+        )
 
         view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
         view.pack()
@@ -852,8 +1071,26 @@ class TestInventoryView:
         view.destroy()
 
     def test_inventory_view_batch_toggle_proxy(self, clean_root, inv_service, task_manager):
-        inv_service.add_or_update_card(InventoryCard(oracle_id="1", name="Card 1", set_code="set", collector_number="1", quantity=1, is_proxy=False))
-        inv_service.add_or_update_card(InventoryCard(oracle_id="2", name="Card 2", set_code="set", collector_number="2", quantity=1, is_proxy=False))
+        inv_service.add_or_update_card(
+            InventoryCard(
+                oracle_id="1",
+                name="Card 1",
+                set_code="set",
+                collector_number="1",
+                quantity=1,
+                is_proxy=False,
+            )
+        )
+        inv_service.add_or_update_card(
+            InventoryCard(
+                oracle_id="2",
+                name="Card 2",
+                set_code="set",
+                collector_number="2",
+                quantity=1,
+                is_proxy=False,
+            )
+        )
 
         view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
         view.pack()
@@ -877,8 +1114,26 @@ class TestInventoryView:
         view.destroy()
 
     def test_inventory_view_batch_toggle_foil(self, clean_root, inv_service, task_manager):
-        inv_service.add_or_update_card(InventoryCard(oracle_id="1", name="Card 1", set_code="set", collector_number="1", quantity=1, is_foil=False))
-        inv_service.add_or_update_card(InventoryCard(oracle_id="2", name="Card 2", set_code="set", collector_number="2", quantity=1, is_foil=False))
+        inv_service.add_or_update_card(
+            InventoryCard(
+                oracle_id="1",
+                name="Card 1",
+                set_code="set",
+                collector_number="1",
+                quantity=1,
+                is_foil=False,
+            )
+        )
+        inv_service.add_or_update_card(
+            InventoryCard(
+                oracle_id="2",
+                name="Card 2",
+                set_code="set",
+                collector_number="2",
+                quantity=1,
+                is_foil=False,
+            )
+        )
 
         view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
         view.pack()
@@ -902,8 +1157,28 @@ class TestInventoryView:
         view.destroy()
 
     def test_inventory_view_batch_edit_click(self, clean_root, inv_service, task_manager):
-        id1 = inv_service.add_or_update_card(InventoryCard(oracle_id="1", name="Card 1", set_code="set", collector_number="1", quantity=1, condition="NM", language="en"))
-        id2 = inv_service.add_or_update_card(InventoryCard(oracle_id="2", name="Card 2", set_code="set", collector_number="2", quantity=1, condition="NM", language="en"))
+        id1 = inv_service.add_or_update_card(
+            InventoryCard(
+                oracle_id="1",
+                name="Card 1",
+                set_code="set",
+                collector_number="1",
+                quantity=1,
+                condition="NM",
+                language="en",
+            )
+        )
+        id2 = inv_service.add_or_update_card(
+            InventoryCard(
+                oracle_id="2",
+                name="Card 2",
+                set_code="set",
+                collector_number="2",
+                quantity=1,
+                condition="NM",
+                language="en",
+            )
+        )
 
         view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
         view.pack()
@@ -940,8 +1215,16 @@ class TestInventoryView:
         view.destroy()
 
     def test_inventory_view_batch_assign_deck_click(self, clean_root, inv_service, task_manager):
-        inv_service.add_or_update_card(InventoryCard(oracle_id="1", name="Card 1", set_code="set", collector_number="1", quantity=2))
-        inv_service.add_or_update_card(InventoryCard(oracle_id="2", name="Card 2", set_code="set", collector_number="2", quantity=1))
+        inv_service.add_or_update_card(
+            InventoryCard(
+                oracle_id="1", name="Card 1", set_code="set", collector_number="1", quantity=2
+            )
+        )
+        inv_service.add_or_update_card(
+            InventoryCard(
+                oracle_id="2", name="Card 2", set_code="set", collector_number="2", quantity=1
+            )
+        )
 
         deck_id = inv_service.register_deck(DeckRecord(name="Commander Deck"), cards=[])
 
@@ -959,8 +1242,10 @@ class TestInventoryView:
         }
 
         with patch.object(view, "wait_window"):
-            with patch("gui.views.inventory_view.BatchAssignDeckDialog") as MockDialog, \
-                 patch("tkinter.messagebox.showinfo") as mock_info:
+            with (
+                patch("gui.views.inventory_view.BatchAssignDeckDialog") as MockDialog,
+                patch("tkinter.messagebox.showinfo") as mock_info,
+            ):
                 mock_dlg_instance = MagicMock()
                 mock_dlg_instance.result = mock_result
                 MockDialog.return_value = mock_dlg_instance
@@ -977,13 +1262,30 @@ class TestInventoryView:
         view.destroy()
 
     def test_inventory_view_batch_delete_with_warning(self, clean_root, inv_service, task_manager):
-        inv_service.add_or_update_card(InventoryCard(oracle_id="1", name="Card In Deck", set_code="set", collector_number="1", quantity=1))
-        inv_service.add_or_update_card(InventoryCard(oracle_id="2", name="Card Free", set_code="set", collector_number="2", quantity=1))
+        inv_service.add_or_update_card(
+            InventoryCard(
+                oracle_id="1", name="Card In Deck", set_code="set", collector_number="1", quantity=1
+            )
+        )
+        inv_service.add_or_update_card(
+            InventoryCard(
+                oracle_id="2", name="Card Free", set_code="set", collector_number="2", quantity=1
+            )
+        )
 
         # Register deck using Card 1
         inv_service.register_deck(
             DeckRecord(name="Ur-Dragon"),
-            [DeckCardEntry(deck_id=0, oracle_id="1", name="Card In Deck", set_code="set", collector_number="1", quantity_required=1)],
+            [
+                DeckCardEntry(
+                    deck_id=0,
+                    oracle_id="1",
+                    name="Card In Deck",
+                    set_code="set",
+                    collector_number="1",
+                    quantity_required=1,
+                )
+            ],
         )
 
         view = InventoryView(clean_root, inventory_service=inv_service, task_manager=task_manager)
@@ -1004,5 +1306,3 @@ class TestInventoryView:
         assert len(inv_service.get_inventory_cards()) == 0
 
         view.destroy()
-
-

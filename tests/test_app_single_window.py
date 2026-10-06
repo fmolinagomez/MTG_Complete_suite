@@ -39,7 +39,9 @@ def test_app_initialization_and_routes(tk_root, tmp_path):
 
     # Test engine event polling
     app.task_manager._event_queue.put(
-        JobProgressEvent(job_id="job_1", stage="DOWNLOAD", current=5, total=10, message="Downloading art")
+        JobProgressEvent(
+            job_id="job_1", stage="DOWNLOAD", current=5, total=10, message="Downloading art"
+        )
     )
     app.task_manager._event_queue.put(
         JobResultEvent(job_id="job_1", status=JobStatus.COMPLETED, result=None)

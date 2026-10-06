@@ -100,11 +100,17 @@ def init_db(db_path: Path | str | None = None) -> Path:
         existing_cols = {row["name"] for row in cursor.fetchall()}
 
         if "physical_quantity" not in existing_cols:
-            conn.execute("ALTER TABLE deck_cards ADD COLUMN physical_quantity INTEGER NOT NULL DEFAULT 0")
+            conn.execute(
+                "ALTER TABLE deck_cards ADD COLUMN physical_quantity INTEGER NOT NULL DEFAULT 0"
+            )
         if "proxy_quantity" not in existing_cols:
-            conn.execute("ALTER TABLE deck_cards ADD COLUMN proxy_quantity INTEGER NOT NULL DEFAULT 0")
+            conn.execute(
+                "ALTER TABLE deck_cards ADD COLUMN proxy_quantity INTEGER NOT NULL DEFAULT 0"
+            )
         if "fulfilled_card_id" not in existing_cols:
-            conn.execute("ALTER TABLE deck_cards ADD COLUMN fulfilled_card_id INTEGER REFERENCES inventory_cards(id) ON DELETE SET NULL")
+            conn.execute(
+                "ALTER TABLE deck_cards ADD COLUMN fulfilled_card_id INTEGER REFERENCES inventory_cards(id) ON DELETE SET NULL"
+            )
 
         # Backfill existing rows that have default 0 for both physical and proxy
         conn.execute(

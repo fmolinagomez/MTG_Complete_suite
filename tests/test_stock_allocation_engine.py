@@ -33,16 +33,68 @@ class TestStockAllocationEngine:
 
     def test_calculate_missing_proxies_pure_memory(self, engine: StockAllocationEngine):
         inventory = [
-            InventoryCard(id=1, oracle_id="orc-1", name="Sol Ring", set_code="c21", collector_number="263", quantity=2, is_proxy=False),
-            InventoryCard(id=2, oracle_id="orc-2", name="Mana Vault", set_code="uma", collector_number="229", quantity=1, is_proxy=False),
-            InventoryCard(id=3, oracle_id="orc-3", name="Proxy Lotus", set_code="lea", collector_number="232", quantity=4, is_proxy=True),
+            InventoryCard(
+                id=1,
+                oracle_id="orc-1",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity=2,
+                is_proxy=False,
+            ),
+            InventoryCard(
+                id=2,
+                oracle_id="orc-2",
+                name="Mana Vault",
+                set_code="uma",
+                collector_number="229",
+                quantity=1,
+                is_proxy=False,
+            ),
+            InventoryCard(
+                id=3,
+                oracle_id="orc-3",
+                name="Proxy Lotus",
+                set_code="lea",
+                collector_number="232",
+                quantity=4,
+                is_proxy=True,
+            ),
         ]
 
         deck_cards = [
-            DeckCardEntry(deck_id=1, oracle_id="orc-1", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=3),
-            DeckCardEntry(deck_id=1, oracle_id="orc-2", name="Mana Vault", set_code="uma", collector_number="229", quantity_required=1),
-            DeckCardEntry(deck_id=1, oracle_id="orc-3", name="Proxy Lotus", set_code="lea", collector_number="232", quantity_required=1),
-            DeckCardEntry(deck_id=1, oracle_id="orc-4", name="Mox Pearl", set_code="lea", collector_number="233", quantity_required=1),
+            DeckCardEntry(
+                deck_id=1,
+                oracle_id="orc-1",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity_required=3,
+            ),
+            DeckCardEntry(
+                deck_id=1,
+                oracle_id="orc-2",
+                name="Mana Vault",
+                set_code="uma",
+                collector_number="229",
+                quantity_required=1,
+            ),
+            DeckCardEntry(
+                deck_id=1,
+                oracle_id="orc-3",
+                name="Proxy Lotus",
+                set_code="lea",
+                collector_number="232",
+                quantity_required=1,
+            ),
+            DeckCardEntry(
+                deck_id=1,
+                oracle_id="orc-4",
+                name="Mox Pearl",
+                set_code="lea",
+                collector_number="233",
+                quantity_required=1,
+            ),
         ]
 
         # Default (include_proxies=True): Proxy Lotus in inventory counts as owned
@@ -68,10 +120,25 @@ class TestStockAllocationEngine:
     def test_calculate_missing_proxies_name_fallback_matching(self, engine: StockAllocationEngine):
         # Stock has empty oracle_id but identical name
         inventory = [
-            InventoryCard(id=1, oracle_id="", name="Counterspell", set_code="ema", collector_number="43", quantity=2, is_proxy=False),
+            InventoryCard(
+                id=1,
+                oracle_id="",
+                name="Counterspell",
+                set_code="ema",
+                collector_number="43",
+                quantity=2,
+                is_proxy=False,
+            ),
         ]
         deck_cards = [
-            DeckCardEntry(deck_id=1, oracle_id="orc-counter", name="COUNTERSPELL", set_code="mh2", collector_number="267", quantity_required=3),
+            DeckCardEntry(
+                deck_id=1,
+                oracle_id="orc-counter",
+                name="COUNTERSPELL",
+                set_code="mh2",
+                collector_number="267",
+                quantity_required=3,
+            ),
         ]
 
         plan = engine.calculate_missing_proxies(deck_cards, inventory)
@@ -81,13 +148,36 @@ class TestStockAllocationEngine:
 
     def test_exclusive_vs_shared_allocation_policy(self, engine: StockAllocationEngine):
         inventory = [
-            InventoryCard(id=1, oracle_id="orc-sol", name="Sol Ring", set_code="c21", collector_number="263", quantity=2, is_proxy=False),
+            InventoryCard(
+                id=1,
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity=2,
+                is_proxy=False,
+            ),
         ]
         other_deck_cards = [
-            DeckCardEntry(deck_id=10, oracle_id="orc-sol", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=1, is_proxy=False),
+            DeckCardEntry(
+                deck_id=10,
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity_required=1,
+                is_proxy=False,
+            ),
         ]
         requested_cards = [
-            DeckCardEntry(deck_id=20, oracle_id="orc-sol", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=2),
+            DeckCardEntry(
+                deck_id=20,
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity_required=2,
+            ),
         ]
 
         # Exclusive: Deck 10 takes 1 of 2 -> 1 left for Deck 20
@@ -123,23 +213,77 @@ class TestStockAllocationEngine:
 
     def test_analyze_deck_card_matches(self, engine: StockAllocationEngine):
         inventory = [
-            InventoryCard(id=1, oracle_id="orc-sol", name="Sol Ring", set_code="c21", collector_number="263", quantity=2, is_proxy=False),
-            InventoryCard(id=2, oracle_id="orc-sol", name="Sol Ring", set_code="2xm", collector_number="270", quantity=1, is_proxy=False),
-            InventoryCard(id=3, oracle_id="orc-crypt", name="Mana Crypt", set_code="ema", collector_number="225", quantity=1, is_proxy=False),
+            InventoryCard(
+                id=1,
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity=2,
+                is_proxy=False,
+            ),
+            InventoryCard(
+                id=2,
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="2xm",
+                collector_number="270",
+                quantity=1,
+                is_proxy=False,
+            ),
+            InventoryCard(
+                id=3,
+                oracle_id="orc-crypt",
+                name="Mana Crypt",
+                set_code="ema",
+                collector_number="225",
+                quantity=1,
+                is_proxy=False,
+            ),
         ]
 
         deck_cards = [
             # Exact match: 2 required, 2 exact stock (c21 #263)
-            DeckCardEntry(deck_id=1, oracle_id="orc-sol", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=2),
+            DeckCardEntry(
+                deck_id=1,
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity_required=2,
+            ),
             # Alt match: 1 required, 0 exact (lea #100), 1 alt remaining (2xm #270)
-            DeckCardEntry(deck_id=1, oracle_id="orc-sol", name="Sol Ring", set_code="lea", collector_number="100", quantity_required=1),
+            DeckCardEntry(
+                deck_id=1,
+                oracle_id="orc-sol",
+                name="Sol Ring",
+                set_code="lea",
+                collector_number="100",
+                quantity_required=1,
+            ),
             # Partial match: 2 required, 1 exact available
-            DeckCardEntry(deck_id=1, oracle_id="orc-crypt", name="Mana Crypt", set_code="ema", collector_number="225", quantity_required=2),
+            DeckCardEntry(
+                deck_id=1,
+                oracle_id="orc-crypt",
+                name="Mana Crypt",
+                set_code="ema",
+                collector_number="225",
+                quantity_required=2,
+            ),
             # Missing: 1 required, 0 available
-            DeckCardEntry(deck_id=1, oracle_id="orc-lotus", name="Black Lotus", set_code="lea", collector_number="232", quantity_required=1),
+            DeckCardEntry(
+                deck_id=1,
+                oracle_id="orc-lotus",
+                name="Black Lotus",
+                set_code="lea",
+                collector_number="232",
+                quantity_required=1,
+            ),
         ]
 
-        details, total_exact, total_alt, total_missing = engine.analyze_deck_card_matches(deck_cards, inventory)
+        details, total_exact, total_alt, total_missing = engine.analyze_deck_card_matches(
+            deck_cards, inventory
+        )
 
         assert len(details) == 4
         assert details[0].status == "exact"
@@ -167,16 +311,56 @@ class TestStockAllocationEngine:
 
     def test_calculate_inventory_usage(self, engine: StockAllocationEngine):
         inventory = [
-            InventoryCard(id=101, oracle_id="orc-1", name="Sol Ring", set_code="c21", collector_number="263", quantity=3, is_proxy=False),
-            InventoryCard(id=102, oracle_id="orc-1", name="Sol Ring", set_code="2xm", collector_number="270", quantity=1, is_proxy=False),
-            InventoryCard(id=103, oracle_id="orc-2", name="Island", set_code="unf", collector_number="236", quantity=10, is_proxy=False),
+            InventoryCard(
+                id=101,
+                oracle_id="orc-1",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity=3,
+                is_proxy=False,
+            ),
+            InventoryCard(
+                id=102,
+                oracle_id="orc-1",
+                name="Sol Ring",
+                set_code="2xm",
+                collector_number="270",
+                quantity=1,
+                is_proxy=False,
+            ),
+            InventoryCard(
+                id=103,
+                oracle_id="orc-2",
+                name="Island",
+                set_code="unf",
+                collector_number="236",
+                quantity=10,
+                is_proxy=False,
+            ),
         ]
 
         deck_cards = [
             # Exact match takes 2 from id 101
-            DeckCardEntry(deck_id=1, oracle_id="orc-1", name="Sol Ring", set_code="c21", collector_number="263", quantity_required=2, is_proxy=False),
+            DeckCardEntry(
+                deck_id=1,
+                oracle_id="orc-1",
+                name="Sol Ring",
+                set_code="c21",
+                collector_number="263",
+                quantity_required=2,
+                is_proxy=False,
+            ),
             # Alt match for a different set (lea) takes remaining 1 from 101, then 1 from 102
-            DeckCardEntry(deck_id=2, oracle_id="orc-1", name="Sol Ring", set_code="lea", collector_number="1", quantity_required=2, is_proxy=False),
+            DeckCardEntry(
+                deck_id=2,
+                oracle_id="orc-1",
+                name="Sol Ring",
+                set_code="lea",
+                collector_number="1",
+                quantity_required=2,
+                is_proxy=False,
+            ),
         ]
 
         usage, avail = engine.calculate_inventory_usage(inventory, deck_cards)

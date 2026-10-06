@@ -196,9 +196,7 @@ class ValidatorView(ttk.Frame):
         self.summary_var = tk.StringVar(
             value="Mazo: Sin cargar | Total: 0 | Válidas: 0 | Advertencias: 0 | Errores: 0"
         )
-        summary_lbl = ttk.Label(
-            summary_frame, textvariable=self.summary_var, font=("Segoe UI", 9)
-        )
+        summary_lbl = ttk.Label(summary_frame, textvariable=self.summary_var, font=("Segoe UI", 9))
         summary_lbl.pack(side=tk.LEFT)
 
         self.export_btn = ttk.Button(
@@ -530,7 +528,17 @@ class ValidatorView(ttk.Frame):
         with open(path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(
-                ["Nombre", "Cantidad", "Zona", "Edición", "Nº", "Tipo", "Rareza", "Estado", "Detalles"]
+                [
+                    "Nombre",
+                    "Cantidad",
+                    "Zona",
+                    "Edición",
+                    "Nº",
+                    "Tipo",
+                    "Rareza",
+                    "Estado",
+                    "Detalles",
+                ]
             )
             zone_map = {"main": "Principal", "side": "Sideboard", "token": "Token"}
             for res in self.current_deck_cards:

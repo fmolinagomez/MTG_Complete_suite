@@ -89,4 +89,3 @@ class DeckCardMatchDetail:
     assigned_version_id: int | None = None
     physical_quantity: int = 0
     proxy_quantity: int = 0
-

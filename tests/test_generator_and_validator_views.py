@@ -121,7 +121,9 @@ class TestGeneratorView:
         view = GeneratorView(clean_root)
         view.pack()
 
-        card = DeckCard(name="Black Lotus", set_code="LEA", collector_number="232", quantity=1, zone="main")
+        card = DeckCard(
+            name="Black Lotus", set_code="LEA", collector_number="232", quantity=1, zone="main"
+        )
         deck = MtgUrlDeck(url="https://moxfield.com/decks/123", cards=[card], name="Test MTG")
         view.state.mtg_url_decks.append(deck)
 
@@ -163,11 +165,13 @@ class TestGeneratorView:
             xml_file.write_text("<order></order>", encoding="utf-8")
             view.state.xml_paths.append(xml_file)
 
-            with patch.object(view, "_confirm_cut_lines", return_value=True), \
-                 patch("gui.views.generator_view.analyze", return_value=[]), \
-                 patch("gui.views.generator_view.plan", return_value=MagicMock(jobs=[])), \
-                 patch("gui.views.generator_view.format_warning", return_value=None), \
-                 patch.object(tm, "submit_job", wraps=tm.submit_job) as mock_submit:
+            with (
+                patch.object(view, "_confirm_cut_lines", return_value=True),
+                patch("gui.views.generator_view.analyze", return_value=[]),
+                patch("gui.views.generator_view.plan", return_value=MagicMock(jobs=[])),
+                patch("gui.views.generator_view.format_warning", return_value=None),
+                patch.object(tm, "submit_job", wraps=tm.submit_job) as mock_submit,
+            ):
                 view._start(fronts_only=True)
                 assert view.running is True
                 mock_submit.assert_called_once()
@@ -293,7 +297,21 @@ class TestValidatorView:
             rarity="uncommon",
         )
         view.current_deck_cards.append(res)
-        item_id = view.tree.insert("", tk.END, values=("Sol Ring", 1, "Principal", "CMM", "345", "Artifact", "Uncommon", "🟢 Válido", "Todo correcto"))
+        item_id = view.tree.insert(
+            "",
+            tk.END,
+            values=(
+                "Sol Ring",
+                1,
+                "Principal",
+                "CMM",
+                "345",
+                "Artifact",
+                "Uncommon",
+                "🟢 Válido",
+                "Todo correcto",
+            ),
+        )
 
         # Test hover resolver
         info = view._resolve_tree_card(item_id)

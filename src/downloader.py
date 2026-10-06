@@ -144,7 +144,11 @@ def download_image(drive_id: str, dest_dir: Path, filename: str) -> Path:
                         text_sample = resp.content[:4096].decode("utf-8", errors="ignore")
                 except Exception:
                     pass
-                if "virus scan warning" in text_sample.lower() or "confirm=" in text_sample or "download_warning" in text_sample:
+                if (
+                    "virus scan warning" in text_sample.lower()
+                    or "confirm=" in text_sample
+                    or "download_warning" in text_sample
+                ):
                     resp = requests.get(
                         f"https://drive.google.com/uc?export=download&id={drive_id}&confirm=t",
                         stream=True,
@@ -175,7 +179,10 @@ def download_image(drive_id: str, dest_dir: Path, filename: str) -> Path:
                 continue
             _log.error("Timeout downloading %s (%s)", filename, drive_id)
             raise DownloadTimeoutError(drive_id, filename) from exc
-        except (requests.exceptions.ConnectionError, requests.exceptions.ChunkedEncodingError) as exc:
+        except (
+            requests.exceptions.ConnectionError,
+            requests.exceptions.ChunkedEncodingError,
+        ) as exc:
             _safe_unlink(tmp_path)
             if attempt < _MAX_RETRIES:
                 _log.warning(
