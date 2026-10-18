@@ -1,18 +1,27 @@
-"""Lorcana deck scraper — supports lorcana.gg, inkdecks.com"""
+"""Lorcana deck scraper — supports lorcana.gg, inkdecks.com, dreamborn.ink, inktable.net."""
 
 from __future__ import annotations
 
 import re
 import threading
 import urllib.parse
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import requests
 
 from src.constants import ProgressCallback
 from src.http_client import get as http_get
-from src.scraper_utils import download_url_images, generate_fallback_back
+from src.scraper_utils import (
+    download_url_images,
+    fetch_dotgg_deck_data,
+    fetch_json,
+    get_global_cache,
+    load_dotgg_card_db,
+    resolve_card_back,
+)
 from src.scraper_utils import resources_dir as _resources_dir
 
 _HEADERS = {
@@ -28,8 +37,10 @@ _DOTGG_DECK_API = "https://api.dotgg.gg/cgfw/getdeck?game=lorcana&slug={slug}"
 _DOTGG_CARDS_API = "https://api.dotgg.gg/cgfw/getcards?game=lorcana&mode=indexed"
 _DOTGG_IMAGE_URL = "https://static.dotgg.gg/lorcana/cards/{card_id}.webp"
 
-# ── inkdecks.com ─────────────────────────────────────────────────────────────
+# ── inkdecks.com / dreamborn.ink / inktable.net ──────────────────────────────
 _INKDECKS_API = "https://inkdecks.com/api/lorcana/decks/{deck_id}"
+_DREAMBORN_RE = re.compile(r"dreamborn\.ink/(?:api/)?decks/([A-Za-z0-9_-]+)")
+_INKTABLE_RE = re.compile(r"inktable\.net/(?:api/)?(?:lorcana/)?decks?/([A-Za-z0-9_-]+)")
 
 # dotgg card DB cache
 _dotgg_lock = threading.Lock()
@@ -58,6 +69,7 @@ class LocanaDeck:
     name: str
     cards: list[LorcanaCard] = field(default_factory=list)
     source: str = "lorcana_gg"
+    raw_data: dict[str, Any] | None = None
 
     @property
     def total_slots(self) -> int:
@@ -69,21 +81,28 @@ class LocanaDeck:
 
 def get_lorcana_back() -> Path:
     """Return the Lorcana card back image path, generating a fallback if missing."""
-    back = _resources_dir() / "backs" / "lorcana" / "back.png"
+    res = _resources_dir()
+    back = res / "backs" / "lorcana" / "back.png"
     if back.exists():
         return back
-    return _generate_fallback_back()
+    return _generate_fallback_back(res)
 
 
-def _generate_fallback_back() -> Path:
+def _generate_fallback_back(res_dir: Path | None = None) -> Path:
     global _fallback_back_path
     with _fallback_lock:
         if _fallback_back_path is not None and _fallback_back_path.exists():
             return _fallback_back_path
-        import tempfile
-
-        tmp = Path(tempfile.mkdtemp())
-        path = generate_fallback_back(tmp / "back.png", "#0a1f44", "#c8a84b")
+        cache = get_global_cache()
+        cache.invalidate("fallback_back:lorcana:back:#0a1f44:#c8a84b:480x670")
+        path = resolve_card_back(
+            "lorcana",
+            "back",
+            bg="#0a1f44",
+            border="#c8a84b",
+            res_dir=res_dir if res_dir is not None else _resources_dir(),
+            cache=cache,
+        )
         _fallback_back_path = path
         return path
 
@@ -95,27 +114,16 @@ def _load_dotgg_card_db() -> tuple[dict[str, dict], dict[str, str]]:
     """Fetch the dotgg lorcana cards DB once. Returns ({id: card}, {name.lower(): id})."""
     global _dotgg_cache, _dotgg_name_cache
     with _dotgg_lock:
-        if _dotgg_cache is not None:
-            return _dotgg_cache, _dotgg_name_cache  # type: ignore[return-value]
-        r = http_get(_DOTGG_CARDS_API, headers=_HEADERS, timeout=30)
-        r.raise_for_status()
-        try:
-            raw = r.json()
-            names = raw["names"]
-            rows = raw["data"]
-        except (ValueError, KeyError) as exc:
-            raise ValueError(
-                f"La base de datos de cartas de dotgg.gg devolvió un formato inesperado: {exc}\n"
-                "Puede ser un problema temporal. Vuelve a intentarlo."
-            ) from exc
-        id_to_card: dict[str, dict] = {}
-        name_to_id: dict[str, str] = {}
-        for row in rows:
-            card = dict(zip(names, row))
-            cid = card.get("id", "")
-            if cid:
-                id_to_card[cid] = card
-                name_to_id[card.get("name", "").lower()] = cid
+        if _dotgg_cache is not None and _dotgg_name_cache is not None:
+            return _dotgg_cache, _dotgg_name_cache
+        cache = get_global_cache()
+        cache.invalidate("dotgg:cards:lorcana")
+        id_to_card, name_to_id = load_dotgg_card_db(
+            "lorcana",
+            headers=_HEADERS,
+            timeout=30,
+            cache=cache,
+        )
         _dotgg_cache = id_to_card
         _dotgg_name_cache = name_to_id
         return id_to_card, name_to_id
@@ -147,7 +155,14 @@ def scrape_deck(url: str) -> LocanaDeck:
         return _scrape_lorcana_gg(url)
     if "inkdecks.com" in host:
         return _scrape_inkdecks(url)
-    raise ValueError(f"URL no reconocida: {url}\nWebs soportadas: lorcana.gg, inkdecks.com")
+    if "dreamborn.ink" in host:
+        return _scrape_dreamborn(url)
+    if "inktable.net" in host:
+        return _scrape_inktable(url)
+    raise ValueError(
+        f"URL no reconocida: {url}\n"
+        "Webs soportadas: lorcana.gg, inkdecks.com, dreamborn.ink, inktable.net"
+    )
 
 
 # ── lorcana.gg (dotgg) scraper ───────────────────────────────────────────────
@@ -162,22 +177,13 @@ def _scrape_lorcana_gg(url: str) -> LocanaDeck:
         )
     slug = m.group(1).strip("/")
 
-    r = http_get(_DOTGG_DECK_API.format(slug=slug), headers=_HEADERS, timeout=20)
-    r.raise_for_status()
-    body = r.text.strip()
-    if not body:
-        raise ValueError(
-            f"El mazo '{slug}' no está disponible en lorcana.gg.\n"
-            "Puede ser privado, haber sido eliminado, o no existir.\n"
-            "Asegúrate de que la URL sea correcta y el mazo sea público."
-        )
-    try:
-        deck_data = r.json()
-    except ValueError as exc:
-        raise ValueError(
-            f"La respuesta de lorcana.gg para '{slug}' no es JSON válido.\n"
-            "La API puede haber cambiado temporalmente. Vuelve a intentarlo."
-        ) from exc
+    deck_data = fetch_dotgg_deck_data(
+        "lorcana",
+        slug,
+        headers=_HEADERS,
+        timeout=20,
+        site_label="lorcana.gg",
+    )
 
     deck_entries = deck_data.get("deck", {})
     if not deck_entries:
@@ -211,6 +217,74 @@ def _scrape_lorcana_gg(url: str) -> LocanaDeck:
         name=deck_data.get("humanname", slug),
         cards=cards,
         source="lorcana_gg",
+        raw_data=deck_data,
+    )
+
+
+# ── dreamborn.ink & inktable.net scrapers ────────────────────────────────────
+
+
+def _scrape_dreamborn(
+    url_or_id: str,
+    *,
+    fetch_json_fn: Callable[..., Any] | None = None,
+) -> LocanaDeck:
+    m = _DREAMBORN_RE.search(url_or_id)
+    if m:
+        deck_id = m.group(1)
+        api_url = (
+            url_or_id if "/api/" in url_or_id else f"https://dreamborn.ink/api/decks/{deck_id}"
+        )
+    elif url_or_id.startswith("http"):
+        deck_id = url_or_id.rstrip("/").split("/")[-1] or "dreamborn"
+        api_url = url_or_id
+    else:
+        deck_id = url_or_id
+        api_url = f"https://dreamborn.ink/api/decks/{deck_id}"
+
+    fetcher = fetch_json_fn or fetch_json
+    data = fetcher(api_url, headers=_HEADERS, timeout=15)
+    name = data.get("name", "Dreamborn Deck")
+    cards = _parse_inkdecks_cards(data.get("cards", []))
+    return LocanaDeck(
+        deck_id=deck_id,
+        name=name,
+        cards=cards,
+        source="dreamborn",
+        raw_data=data,
+    )
+
+
+def _scrape_inktable(
+    url_or_id: str,
+    *,
+    fetch_json_fn: Callable[..., Any] | None = None,
+) -> LocanaDeck:
+    m = _INKTABLE_RE.search(url_or_id)
+    if m:
+        deck_id = m.group(1)
+        api_url = (
+            url_or_id
+            if "/api/" in url_or_id
+            else f"https://inktable.net/api/lorcana/decks/{deck_id}"
+        )
+    elif url_or_id.startswith("http"):
+        deck_id = url_or_id.rstrip("/").split("/")[-1] or "inktable"
+        api_url = url_or_id
+    else:
+        deck_id = url_or_id
+        api_url = f"https://inktable.net/api/lorcana/decks/{deck_id}"
+
+    fetcher = fetch_json_fn or fetch_json
+    data = fetcher(api_url, headers=_HEADERS, timeout=15)
+    name = data.get("name", "Inktable Deck")
+    cards = _parse_inkdecks_cards(data.get("cards", []))
+    return LocanaDeck(
+        deck_id=deck_id,
+        name=name,
+        cards=cards,
+        source="inktable",
+        raw_data=data,
     )
 
 

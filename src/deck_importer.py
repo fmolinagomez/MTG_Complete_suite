@@ -5,6 +5,7 @@ Supports:
 - Lorcana: Dreamborn, Inktable, LorcanaGG, Inkdecks
 - One Piece: OnePieceTopDecks, GumGum, Limitless, OnepieceGG, Egman, Kaizoku
 - Riftbound: PiltoverArchive, Riftmana, Riftbinder, Riftdex, RiftboundGG
+- Yu-Gi-Oh!: YDKE, YGOPRODeck, Master Duel Meta, Yu-Gi-Oh! Meta, Edison Format, YDK
 """
 
 from __future__ import annotations
@@ -17,16 +18,25 @@ import re
 import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import requests
 
+from src import scraper_utils as _scraper_utils
 from src.http_client import get as http_get
-from src.scraper_utils import (
-    fetch_json,
-    fetch_text,
-)
 
 _log = logging.getLogger(__name__)
+
+
+def fetch_json(url: str, **kwargs: Any) -> Any:
+    """Delegate JSON fetching to scraper_utils while preserving deck_importer patch seam."""
+    return _scraper_utils.fetch_json(url, **kwargs)
+
+
+def fetch_text(url: str, **kwargs: Any) -> str:
+    """Delegate text fetching to scraper_utils while preserving deck_importer patch seam."""
+    return _scraper_utils.fetch_text(url, **kwargs)
+
 
 _HEADERS = {
     "User-Agent": (
@@ -662,6 +672,151 @@ class RiftboundDeckAdapter(GameDeckAdapter):
 
 
 # ===========================================================================
+# 5b. Yu-Gi-Oh! Deck Adapter
+# ===========================================================================
+
+
+class YgoDeckAdapter(GameDeckAdapter):
+    """Adapter for Yu-Gi-Oh! (YDKE, YGOPRODeck, Master Duel Meta, Yu-Gi-Oh! Meta, Edison Format, YDK)."""
+
+    @property
+    def game_name(self) -> str:
+        return "yugioh"
+
+    @property
+    def display_name(self) -> str:
+        return "Yu-Gi-Oh!"
+
+    def can_handle_url(self, url: str) -> bool:
+        trimmed = url.strip().lower()
+        if trimmed.startswith("ydke://"):
+            return True
+        host = urllib.parse.urlparse(trimmed).netloc.lower()
+        return any(
+            d in host
+            for d in (
+                "ygoprodeck.com",
+                "masterduelmeta.com",
+                "yugiohmeta.com",
+                "edisonformat.net",
+            )
+        )
+
+    def can_handle_text(self, text: str) -> bool:
+        trimmed = text.strip()
+        if trimmed.lower().startswith("ydke://"):
+            return True
+        lower = trimmed.lower()
+        return any(
+            marker in lower
+            for marker in ("#main", "#extra", "!side", "#created by", "yugioh", "yu-gi-oh")
+        )
+
+    def fetch_deck(self, url: str) -> FetchedDeck:
+        from src import ygo_scraper
+
+        try:
+            ygo_deck = ygo_scraper.scrape_deck(url)
+            cards = [
+                DeckCard(
+                    name=c.name,
+                    collector_number=str(c.card_id),
+                    quantity=c.quantity,
+                    zone=c.zone,
+                    image_url=ygo_scraper._IMAGE_URL.format(card_id=c.card_id),
+                    game="yugioh",
+                )
+                for c in ygo_deck.cards
+            ]
+            return FetchedDeck(
+                name=ygo_deck.name,
+                cards=cards,
+                format="advanced",
+                game="yugioh",
+                source="ygo_scraper",
+            )
+        except Exception as exc:
+            raise DeckImportError(f"Error al importar mazo de Yu-Gi-Oh!: {exc}", "yugioh") from exc
+
+    def parse_deck_list(self, text: str) -> FetchedDeck:
+        from src import ygo_scraper
+
+        trimmed = text.strip()
+        if trimmed.lower().startswith("ydke://"):
+            return self.fetch_deck(trimmed)
+
+        deck_name = "Imported Yu-Gi-Oh! Deck"
+        for line in trimmed.splitlines():
+            s = line.strip()
+            if s.lower().startswith(("// name:", "# name:")):
+                deck_name = s.split(":", 1)[1].strip() or deck_name
+                break
+
+        if any(m in trimmed.lower() for m in ("#main", "#extra", "!side")):
+            section_to_zone = {"#main": "main", "#extra": "extra", "!side": "side"}
+            zone_to_ids: dict[str, list[int]] = {"main": [], "extra": [], "side": []}
+            current_zone: str | None = None
+            for raw_line in trimmed.splitlines():
+                line = raw_line.strip()
+                if line.lower() in section_to_zone:
+                    current_zone = section_to_zone[line.lower()]
+                elif current_zone is not None and line.isdecimal():
+                    zone_to_ids[current_zone].append(int(line))
+            all_ids = list(
+                dict.fromkeys(cid for z in ("main", "extra", "side") for cid in zone_to_ids[z])
+            )
+            try:
+                names = ygo_scraper._fetch_names(all_ids) if all_ids else {}
+            except Exception:
+                names = {}
+            cards: list[DeckCard] = []
+            for z in ("main", "extra", "side"):
+                counts: dict[int, int] = {}
+                for cid in zone_to_ids[z]:
+                    counts[cid] = counts.get(cid, 0) + 1
+                for cid, qty in counts.items():
+                    cards.append(
+                        DeckCard(
+                            name=names.get(cid, str(cid)),
+                            collector_number=str(cid),
+                            quantity=qty,
+                            zone=z,
+                            image_url=ygo_scraper._IMAGE_URL.format(card_id=cid),
+                            game="yugioh",
+                        )
+                    )
+            return FetchedDeck(name=deck_name, cards=cards, format="advanced", game="yugioh")
+
+        cards = []
+        zone = "main"
+        for raw_line in trimmed.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith(("//", "#")):
+                continue
+            lower = line.lower()
+            if lower in ("main:", "main deck:"):
+                zone = "main"
+                continue
+            if lower in ("extra:", "extra deck:"):
+                zone = "extra"
+                continue
+            if lower in ("side:", "side deck:", "sideboard:"):
+                zone = "side"
+                continue
+            m = re.match(r"^(\d+)x?\s+(.+)$", line)
+            if m:
+                cards.append(
+                    DeckCard(
+                        name=m.group(2).strip(),
+                        quantity=int(m.group(1)),
+                        zone=zone,
+                        game="yugioh",
+                    )
+                )
+        return FetchedDeck(name=deck_name, cards=cards, format="advanced", game="yugioh")
+
+
+# ===========================================================================
 # 6. Adapter Registry
 # ===========================================================================
 
@@ -700,6 +855,7 @@ _REGISTRY.register(MtgDeckAdapter())
 _REGISTRY.register(LorcanaDeckAdapter())
 _REGISTRY.register(OnePieceDeckAdapter())
 _REGISTRY.register(RiftboundDeckAdapter())
+_REGISTRY.register(YgoDeckAdapter())
 
 
 def register_adapter(adapter: GameDeckAdapter) -> None:
@@ -718,14 +874,18 @@ def get_adapter(game_name: str) -> GameDeckAdapter | None:
 
 
 def detect_game(url_or_text: str) -> str:
-    """Detect game identifier ('mtg', 'lorcana', 'onepiece', 'riftbound', or 'unknown')."""
+    """Detect game identifier ('mtg', 'lorcana', 'onepiece', 'riftbound', 'yugioh', or 'unknown')."""
     trimmed = url_or_text.strip()
+    if trimmed.lower().startswith("ydke://"):
+        return "yugioh"
     if trimmed.startswith(("http://", "https://", "www.")):
         adapter = _REGISTRY.get_for_url(trimmed)
         if adapter:
             return adapter.game_name
     else:
         lower = trimmed.lower()
+        if any(k in lower for k in ("#main", "#extra", "!side", "yugioh", "yu-gi-oh")):
+            return "yugioh"
         if (
             "riftbound" in lower
             or "piltover" in lower
@@ -1251,25 +1411,56 @@ def _fetch_manabox(deck_id: str) -> FetchedDeck:
 # ===========================================================================
 
 
-def _fetch_lorcana_gg(slug: str) -> FetchedDeck:
-    from src import lorcana_scraper
-
-    url = slug if slug.startswith("http") else f"https://lorcana.gg/decks/{slug}/"
-    deck = lorcana_scraper.scrape_deck(url)
+def _lorcana_deck_to_fetched(deck: Any, source: str) -> FetchedDeck:
     cards = [
         DeckCard(
             name=c.name,
             collector_number=c.card_id,
             quantity=c.quantity,
             zone="main",
-            image_url=c.image_url,
+            image_url=getattr(c, "image_url", ""),
             game="lorcana",
         )
         for c in deck.cards
     ]
     return FetchedDeck(
-        name=deck.name, cards=cards, format="standard", game="lorcana", source="lorcana_gg"
+        name=deck.name,
+        cards=cards,
+        format="standard",
+        raw_json=getattr(deck, "raw_data", None),
+        game="lorcana",
+        source=source,
     )
+
+
+def _op_deck_to_fetched(deck: Any, source: str) -> FetchedDeck:
+    cards = [
+        DeckCard(
+            name=c.name,
+            collector_number=c.card_id,
+            quantity=c.quantity,
+            zone="leader" if c.is_leader else "main",
+            is_commander=c.is_leader,
+            game="onepiece",
+        )
+        for c in deck.cards
+    ]
+    return FetchedDeck(
+        name=deck.name,
+        cards=cards,
+        format="standard",
+        raw_json=getattr(deck, "raw_data", None),
+        game="onepiece",
+        source=source,
+    )
+
+
+def _fetch_lorcana_gg(slug: str) -> FetchedDeck:
+    from src import lorcana_scraper
+
+    url = slug if slug.startswith("http") else f"https://lorcana.gg/decks/{slug}/"
+    deck = lorcana_scraper.scrape_deck(url)
+    return _lorcana_deck_to_fetched(deck, "lorcana_gg")
 
 
 def _fetch_inkdecks(deck_id: str) -> FetchedDeck:
@@ -1281,78 +1472,25 @@ def _fetch_inkdecks(deck_id: str) -> FetchedDeck:
         else f"https://inkdecks.com/lorcana-metagame/deck-{deck_id}"
     )
     deck = lorcana_scraper.scrape_deck(url)
-    cards = [
-        DeckCard(
-            name=c.name,
-            collector_number=c.card_id,
-            quantity=c.quantity,
-            zone="main",
-            image_url=c.image_url,
-            game="lorcana",
-        )
-        for c in deck.cards
-    ]
-    return FetchedDeck(
-        name=deck.name, cards=cards, format="standard", game="lorcana", source="inkdecks"
-    )
+    return _lorcana_deck_to_fetched(deck, "inkdecks")
 
 
 def _fetch_dreamborn(deck_id: str) -> FetchedDeck:
-    url = deck_id if deck_id.startswith("http") else f"https://dreamborn.ink/api/decks/{deck_id}"
+    from src import lorcana_scraper
+
     try:
-        data = fetch_json(url, headers=_HEADERS, timeout=_TIMEOUT)
-        name = data.get("name", "Dreamborn Deck")
-        cards: list[DeckCard] = []
-        for c in data.get("cards", []):
-            cards.append(
-                DeckCard(
-                    name=c.get("name", c.get("id", "")),
-                    collector_number=c.get("id", ""),
-                    quantity=int(c.get("count", c.get("quantity", 1))),
-                    zone="main",
-                    game="lorcana",
-                )
-            )
-        return FetchedDeck(
-            name=name,
-            cards=cards,
-            format="standard",
-            raw_json=data,
-            game="lorcana",
-            source="dreamborn",
-        )
+        deck = lorcana_scraper._scrape_dreamborn(deck_id, fetch_json_fn=fetch_json)
+        return _lorcana_deck_to_fetched(deck, "dreamborn")
     except Exception as exc:
         raise DeckImportError(f"Error al acceder a Dreamborn: {exc}", "dreamborn") from exc
 
 
 def _fetch_inktable(deck_id: str) -> FetchedDeck:
-    url = (
-        deck_id
-        if deck_id.startswith("http")
-        else f"https://inktable.net/api/lorcana/decks/{deck_id}"
-    )
+    from src import lorcana_scraper
+
     try:
-        data = fetch_json(url, headers=_HEADERS, timeout=_TIMEOUT)
-        name = data.get("name", "Inktable Deck")
-        cards: list[DeckCard] = []
-        for c in data.get("cards", []):
-            cards.append(
-                DeckCard(
-                    name=c.get("name", c.get("id", "")),
-                    collector_number=c.get("id", ""),
-                    quantity=int(c.get("quantity", 1)),
-                    zone="main",
-                    game="lorcana",
-                )
-            )
-        return FetchedDeck(
-            name=name,
-            cards=cards,
-            format="standard",
-            raw_json=data,
-            game="lorcana",
-            source="inktable",
-        )
+        deck = lorcana_scraper._scrape_inktable(deck_id, fetch_json_fn=fetch_json)
+        return _lorcana_deck_to_fetched(deck, "inktable")
     except Exception as exc:
         raise DeckImportError(f"Error al acceder a Inktable: {exc}", "inktable") from exc
 
@@ -1362,82 +1500,29 @@ def _fetch_onepiece_gg(slug: str) -> FetchedDeck:
 
     url = slug if slug.startswith("http") else f"https://onepiece.gg/decks/{slug}/"
     deck = op_scraper.scrape_deck(url)
-    cards = [
-        DeckCard(
-            name=c.name,
-            collector_number=c.card_id,
-            quantity=c.quantity,
-            zone="leader" if c.is_leader else "main",
-            is_commander=c.is_leader,
-            game="onepiece",
-        )
-        for c in deck.cards
-    ]
-    return FetchedDeck(
-        name=deck.name, cards=cards, format="standard", game="onepiece", source="onepiece_gg"
-    )
+    return _op_deck_to_fetched(deck, "onepiece_gg")
 
 
 def _fetch_egman_op(url: str) -> FetchedDeck:
     from src import op_scraper
 
     deck = op_scraper.scrape_deck(url)
-    cards = [
-        DeckCard(
-            name=c.name,
-            collector_number=c.card_id,
-            quantity=c.quantity,
-            zone="leader" if c.is_leader else "main",
-            is_commander=c.is_leader,
-            game="onepiece",
-        )
-        for c in deck.cards
-    ]
-    return FetchedDeck(
-        name=deck.name, cards=cards, format="standard", game="onepiece", source="egman"
-    )
+    return _op_deck_to_fetched(deck, "egman")
 
 
 def _fetch_kaizoku_op(url: str) -> FetchedDeck:
     from src import op_scraper
 
     deck = op_scraper.scrape_deck(url)
-    cards = [
-        DeckCard(
-            name=c.name,
-            collector_number=c.card_id,
-            quantity=c.quantity,
-            zone="leader" if c.is_leader else "main",
-            is_commander=c.is_leader,
-            game="onepiece",
-        )
-        for c in deck.cards
-    ]
-    return FetchedDeck(
-        name=deck.name, cards=cards, format="standard", game="onepiece", source="kaizoku"
-    )
+    return _op_deck_to_fetched(deck, "kaizoku")
 
 
 def _fetch_optopdecks(slug: str) -> FetchedDeck:
-    url = slug if slug.startswith("http") else f"https://onepiecetopdecks.com/deck-list/{slug}"
+    from src import op_scraper
+
     try:
-        html_text = fetch_text(url, headers=_HEADERS, timeout=_TIMEOUT)
-        name = "OnePieceTopDecks Deck"
-        m_name = re.search(r"<h1[^>]*>(.*?)</h1>", html_text, re.IGNORECASE)
-        if m_name:
-            name = re.sub(r"<[^>]+>", "", m_name.group(1)).strip() or name
-        cards_found = re.findall(r"((?:OP|ST|EB|PRB)\d{2}-\d{3})", html_text, re.IGNORECASE)
-        card_counts: dict[str, int] = {}
-        for c in cards_found:
-            c_up = c.upper()
-            card_counts[c_up] = card_counts.get(c_up, 0) + 1
-        cards = [
-            DeckCard(name=cid, collector_number=cid, quantity=cnt, zone="main", game="onepiece")
-            for cid, cnt in card_counts.items()
-        ]
-        return FetchedDeck(
-            name=name, cards=cards, format="standard", game="onepiece", source="onepiecetopdecks"
-        )
+        deck = op_scraper._scrape_optopdecks(slug, fetch_text_fn=fetch_text)
+        return _op_deck_to_fetched(deck, "onepiecetopdecks")
     except Exception as exc:
         raise DeckImportError(
             f"Error al acceder a OnePieceTopDecks: {exc}", "onepiecetopdecks"
@@ -1445,56 +1530,20 @@ def _fetch_optopdecks(slug: str) -> FetchedDeck:
 
 
 def _fetch_gumgum(deck_id: str) -> FetchedDeck:
-    url = deck_id if deck_id.startswith("http") else f"https://gumgum.gg/decks/{deck_id}"
+    from src import op_scraper
+
     try:
-        data = fetch_json(url, headers=_HEADERS, timeout=_TIMEOUT)
-        name = data.get("name", "GumGum Deck")
-        cards: list[DeckCard] = []
-        for c in data.get("cards", []):
-            cid = c.get("card_id", c.get("id", ""))
-            cards.append(
-                DeckCard(
-                    name=c.get("name", cid),
-                    collector_number=cid,
-                    quantity=int(c.get("quantity", 1)),
-                    zone="leader" if c.get("is_leader") else "main",
-                    is_commander=bool(c.get("is_leader")),
-                    game="onepiece",
-                )
-            )
-        return FetchedDeck(
-            name=name,
-            cards=cards,
-            format="standard",
-            raw_json=data,
-            game="onepiece",
-            source="gumgum",
-        )
+        deck = op_scraper._scrape_gumgum(deck_id, fetch_json_fn=fetch_json)
+        return _op_deck_to_fetched(deck, "gumgum")
     except Exception as exc:
         raise DeckImportError(f"Error al acceder a GumGum: {exc}", "gumgum") from exc
 
 
 def _fetch_limitless_op(deck_id: str) -> FetchedDeck:
-    url = (
-        deck_id if deck_id.startswith("http") else f"https://play.limitlesstcg.com/decks/{deck_id}"
-    )
+    from src import op_scraper
+
     try:
-        html_text = fetch_text(url, headers=_HEADERS, timeout=_TIMEOUT)
-        name = "Limitless Deck"
-        m_name = re.search(r"<h1[^>]*>(.*?)</h1>", html_text, re.IGNORECASE)
-        if m_name:
-            name = re.sub(r"<[^>]+>", "", m_name.group(1)).strip() or name
-        cards_found = re.findall(r"((?:OP|ST|EB|PRB)\d{2}-\d{3})", html_text, re.IGNORECASE)
-        card_counts: dict[str, int] = {}
-        for c in cards_found:
-            c_up = c.upper()
-            card_counts[c_up] = card_counts.get(c_up, 0) + 1
-        cards = [
-            DeckCard(name=cid, collector_number=cid, quantity=cnt, zone="main", game="onepiece")
-            for cid, cnt in card_counts.items()
-        ]
-        return FetchedDeck(
-            name=name, cards=cards, format="standard", game="onepiece", source="limitless"
-        )
+        deck = op_scraper._scrape_limitless(deck_id, fetch_text_fn=fetch_text)
+        return _op_deck_to_fetched(deck, "limitless")
     except Exception as exc:
         raise DeckImportError(f"Error al acceder a Limitless: {exc}", "limitless") from exc

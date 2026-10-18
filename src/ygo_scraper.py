@@ -17,7 +17,7 @@ import requests  # noqa: F401 - retained as the scraper's test transport seam
 
 from src.constants import ProgressCallback
 from src.http_client import get as http_get
-from src.scraper_utils import bundled_back, download_url_images, generate_fallback_back
+from src.scraper_utils import bundled_back, download_url_images, resolve_card_back
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (MPCFillToPDF Yu-Gi-Oh! importer)"}
 _CARD_INFO_URL = "https://db.ygoprodeck.com/api/v7/cardinfo.php"
@@ -59,12 +59,11 @@ def get_ygo_back() -> Path:
     """Return the bundled Yu-Gi-Oh! back or create a neutral proxy back."""
     if back := bundled_back("yugioh"):
         return back
-    import tempfile
-
-    return generate_fallback_back(
-        Path(tempfile.mkdtemp()) / "yugioh_proxy_back.png",
-        "#5A321A",
-        "#D7A15B",
+    return resolve_card_back(
+        "yugioh",
+        "yugioh_proxy_back",
+        bg="#5A321A",
+        border="#D7A15B",
         size=(590, 860),
     )
 

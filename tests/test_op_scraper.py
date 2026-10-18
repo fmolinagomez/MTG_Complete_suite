@@ -550,3 +550,39 @@ class TestGetOpBacks:
             d, lider = get_op_backs()
         assert d.exists()
         assert lider.exists()
+
+    def test_fallback_backs_are_cached_per_resources_dir(self, tmp_path):
+        with patch("src.op_scraper._resources_dir", return_value=tmp_path):
+            d1, l1 = get_op_backs()
+            d2, l2 = get_op_backs()
+        assert d1 == d2
+        assert l1 == l2
+
+
+class TestAdditionalOPScrapers:
+    def test_scrape_deck_routes_gumgum_limitless_and_optopdecks(self):
+        mock_gg = {
+            "name": "GumGum Law",
+            "cards": [
+                {"id": "OP01-002", "name": "Law", "quantity": 1, "is_leader": True},
+                {"id": "OP01-006", "name": "Otama", "quantity": 4, "is_leader": False},
+            ],
+        }
+        with patch("src.op_scraper.fetch_json", return_value=mock_gg):
+            deck = scrape_deck("https://gumgum.gg/decks/law-123")
+        assert deck.name == "GumGum Law"
+        assert deck.source == "gumgum"
+        assert deck.leader is not None
+        assert deck.leader.card_id == "OP01-002"
+        assert deck.total_slots == 5
+
+        html = "<html><h1>Tournament Zoro</h1><div>OP01-001 OP01-016 OP01-016</div></html>"
+        with patch("src.op_scraper.fetch_text", return_value=html):
+            lim_deck = scrape_deck("https://play.limitlesstcg.com/decks/onepiece/zoro-1")
+            optd_deck = scrape_deck("https://onepiecetopdecks.com/deck-list/zoro-win")
+        assert lim_deck.name == "Tournament Zoro"
+        assert lim_deck.source == "limitless"
+        assert lim_deck.total_slots == 3
+        assert optd_deck.name == "Tournament Zoro"
+        assert optd_deck.source == "onepiecetopdecks"
+        assert optd_deck.total_slots == 3

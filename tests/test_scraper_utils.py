@@ -251,3 +251,79 @@ class TestFetchUtilities:
         ):
             res_frozen = resources_dir()
             assert res_frozen == tmp_path / "resources"
+
+    def test_resolve_card_back_uses_bundled_or_caches_fallback(self, tmp_path):
+        from src.scraper_utils import ScraperCache, resolve_card_back
+
+        cache = ScraperCache()
+        first = resolve_card_back("custom_tcg", "back", res_dir=tmp_path, cache=cache)
+        second = resolve_card_back("custom_tcg", "back", res_dir=tmp_path, cache=cache)
+        assert first == second
+        assert first.exists()
+
+        bundled_dir = tmp_path / "backs" / "custom_tcg"
+        bundled_dir.mkdir(parents=True)
+        bundled_file = bundled_dir / "back.jpg"
+        bundled_file.write_bytes(b"bundled")
+        third = resolve_card_back("custom_tcg", "back", res_dir=tmp_path, cache=cache)
+        assert third == bundled_file
+
+    def test_dotgg_helpers_and_caching(self):
+        from unittest.mock import MagicMock, patch
+
+        from src.scraper_utils import (
+            ScraperCache,
+            fetch_dotgg_deck_data,
+            index_dotgg_cards,
+            load_dotgg_card_db,
+        )
+
+        cache = ScraperCache()
+        cards_resp = MagicMock()
+        cards_resp.json.return_value = {
+            "names": ["id", "name"],
+            "data": [["C-001", "Card One"]],
+        }
+        with patch("src.scraper_utils.http_get", return_value=cards_resp) as mock_get:
+            db1, names1 = load_dotgg_card_db("testgame", cache=cache)
+            db2, names2 = load_dotgg_card_db("testgame", cache=cache)
+
+        assert mock_get.call_count == 1
+        assert db1 == db2
+        assert db1["C-001"]["name"] == "Card One"
+        assert names1["card one"] == "C-001"
+
+        with pytest.raises(ValueError, match="formato"):
+            index_dotgg_cards(["not", "a", "dict"])
+
+        deck_resp = MagicMock()
+        deck_resp.text = '{"humanname":"My Deck","deck":{"C-001":4}}'
+        deck_resp.json.return_value = {"humanname": "My Deck", "deck": {"C-001": 4}}
+        with patch("src.scraper_utils.http_get", return_value=deck_resp):
+            data = fetch_dotgg_deck_data("testgame", "my-slug")
+        assert data["humanname"] == "My Deck"
+
+    def test_download_url_images_404_fallback(self, tmp_path):
+        from unittest.mock import MagicMock, patch
+
+        import requests
+
+        from src.scraper_utils import download_url_images
+
+        err_404 = requests.HTTPError(response=MagicMock(status_code=404))
+        fb_resp = MagicMock(content=b"fallback_img")
+
+        with patch("src.scraper_utils.http_get", side_effect=[err_404, fb_resp]):
+            res = download_url_images(
+                {"C1": "https://example.com/C1.webp"},
+                tmp_path,
+                lambda k, _u: tmp_path / f"{k}.webp",
+                {},
+                fallback_for_key=lambda k: (
+                    f"https://fallback.example.com/{k}.png",
+                    tmp_path / f"{k}.png",
+                    {},
+                ),
+            )
+        assert res["C1"] == tmp_path / "C1.png"
+        assert res["C1"].read_bytes() == b"fallback_img"

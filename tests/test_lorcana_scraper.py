@@ -787,6 +787,35 @@ class TestLoadDotggCardDb:
             self._restore_cache(orig, orig_name)
 
 
+class TestDreambornAndInktableScrapers:
+    def test_scrape_deck_routes_dreamborn_and_inktable_with_resolved_images(self):
+        dreamborn_json = {
+            "name": "Dreamborn Amber",
+            "cards": [
+                {"id": "001-001", "name": "Ariel", "quantity": 4},
+            ],
+        }
+        with patch("src.lorcana_scraper.fetch_json", return_value=dreamborn_json):
+            db_deck = scrape_deck("https://dreamborn.ink/decks/db-amber-1")
+        assert db_deck.name == "Dreamborn Amber"
+        assert db_deck.source == "dreamborn"
+        assert db_deck.total_slots == 4
+        assert "001-001.webp" in db_deck.cards[0].image_url
+
+        inktable_json = {
+            "name": "Inktable Ruby",
+            "cards": [
+                {"id": "001-002", "name": "Elsa", "quantity": 3},
+            ],
+        }
+        with patch("src.lorcana_scraper.fetch_json", return_value=inktable_json):
+            it_deck = scrape_deck("https://inktable.net/lorcana/deck/it-ruby-1")
+        assert it_deck.name == "Inktable Ruby"
+        assert it_deck.source == "inktable"
+        assert it_deck.total_slots == 3
+        assert "001-002.webp" in it_deck.cards[0].image_url
+
+
 # ---------------------------------------------------------------------------
 # Integration tests — live network calls
 # ---------------------------------------------------------------------------

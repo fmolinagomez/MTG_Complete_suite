@@ -1,21 +1,29 @@
-"""One Piece Card Game deck scraper — supports onepiece.gg, deckbuilder.egmanevents.com, deckbuilder.cardkaizoku.com."""
+"""One Piece Card Game deck scraper — supports onepiece.gg, egmanevents.com, cardkaizoku.com, onepiecetopdecks.com, gumgum.gg, limitlesstcg.com."""
 
 from __future__ import annotations
 
 import re
 import threading
 import urllib.parse
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
-import requests
+import requests  # noqa: F401 - retained as the scraper's test transport seam
 
-from src.cancellation import Cancelled
 from src.constants import ProgressCallback
 from src.http_client import get as http_get
 from src.http_client import post as http_post
-from src.scraper_utils import generate_fallback_back
+from src.scraper_utils import (
+    download_url_images,
+    fetch_dotgg_deck_data,
+    fetch_json,
+    fetch_text,
+    generate_fallback_back,
+    get_global_cache,
+    load_dotgg_card_db,
+)
 from src.scraper_utils import resources_dir as _resources_dir
 
 _HEADERS = {
@@ -39,6 +47,12 @@ _EGMAN_SUPA_KEY = "sb_publishable_bdDgor6ifmOvryEuZKWniw_RBzb3vuh"
 # ── cardkaizoku ────────────────────────────────────────────────────────────
 _KAIZOKU_CDN = "https://cdn.cardkaizoku.com"
 _KAIZOKU_REFERER = "https://deckbuilder.cardkaizoku.com/"
+
+# ── onepiecetopdecks / gumgum / limitless ──────────────────────────────────
+_OPTD_RE = re.compile(r"onepiecetopdecks\.com/deck-list/([^/?#]+)")
+_GUMGUM_RE = re.compile(r"gumgum(?:tcg)?\.(?:gg|com)/decks?/([A-Za-z0-9_-]+)")
+_LIMITLESS_RE = re.compile(r"(?:play\.)?limitlesstcg\.com/decks/(?:onepiece/)?([A-Za-z0-9_-]+)")
+_OP_CARD_CODE_RE = re.compile(r"((?:OP|ST|EB|PRB)\d{2}-\d{3})", re.IGNORECASE)
 
 
 # ── Image URL callables keyed by source ───────────────────────────────────
@@ -70,22 +84,42 @@ def get_op_backs() -> tuple[Path, Path]:
     """Return (default_back, leader_back) from resources/backs/op/.
     Falls back to generating simple colored images if the files are missing.
     """
-    op_dir = _resources_dir() / "backs" / "op"
+    res = _resources_dir()
+    op_dir = res / "backs" / "op"
     default = op_dir / "default.png"
     leader = op_dir / "lider.png"
     if default.exists() and leader.exists():
         return default, leader
-    return _generate_fallback_backs()
+    return _generate_fallback_backs(res)
 
 
-def _generate_fallback_backs() -> tuple[Path, Path]:
+def _generate_fallback_backs(res_dir: Path | None = None) -> tuple[Path, Path]:
     import tempfile
 
+    if res_dir is None:
+        tmp = Path(tempfile.mkdtemp())
+        return (
+            generate_fallback_back(tmp / "default.png", _STANDARD_BACK_BG, _STANDARD_BACK_BORDER),
+            generate_fallback_back(tmp / "lider.png", "#8B0000", "#CCCCCC"),
+        )
+    cache = get_global_cache()
+    default_back = cache.get(f"fallback_back:op:default:{res_dir}")
+    leader_back = cache.get(f"fallback_back:op:lider:{res_dir}")
+    if (
+        isinstance(default_back, Path)
+        and default_back.exists()
+        and isinstance(leader_back, Path)
+        and leader_back.exists()
+    ):
+        return default_back, leader_back
     tmp = Path(tempfile.mkdtemp())
-    return (
-        generate_fallback_back(tmp / "default.png", _STANDARD_BACK_BG, _STANDARD_BACK_BORDER),
-        generate_fallback_back(tmp / "lider.png", "#8B0000", "#CCCCCC"),
+    default_path = generate_fallback_back(
+        tmp / "default.png", _STANDARD_BACK_BG, _STANDARD_BACK_BORDER
     )
+    leader_path = generate_fallback_back(tmp / "lider.png", "#8B0000", "#CCCCCC")
+    cache.set(f"fallback_back:op:default:{res_dir}", default_path)
+    cache.set(f"fallback_back:op:lider:{res_dir}", leader_path)
+    return default_path, leader_path
 
 
 # ── Data model ────────────────────────────────────────────────────────────
@@ -105,7 +139,10 @@ class OPDeck:
     name: str
     slug: str
     cards: list[OPCard]
-    source: str = "dotgg"  # "dotgg" | "egman" | "kaizoku"
+    source: str = (
+        "dotgg"  # "dotgg" | "egman" | "kaizoku" | "onepiecetopdecks" | "gumgum" | "limitless"
+    )
+    raw_data: dict[str, Any] | None = None
 
     @property
     def leader(self) -> OPCard | None:
@@ -128,9 +165,16 @@ def scrape_deck(url: str) -> OPDeck:
         return _scrape_egman(url)
     if "cardkaizoku.com" in host:
         return _scrape_kaizoku(url)
+    if "onepiecetopdecks.com" in host:
+        return _scrape_optopdecks(url)
+    if "gumgum" in host:
+        return _scrape_gumgum(url)
+    if "limitless" in host:
+        return _scrape_limitless(url)
     raise ValueError(
         f"URL no reconocida: {url}\n"
-        "Webs soportadas: onepiece.gg, deckbuilder.egmanevents.com, deckbuilder.cardkaizoku.com"
+        "Webs soportadas: onepiece.gg, deckbuilder.egmanevents.com, "
+        "deckbuilder.cardkaizoku.com, onepiecetopdecks.com, gumgum.gg, limitlesstcg.com"
     )
 
 
@@ -143,15 +187,22 @@ def _scrape_dotgg(url: str) -> OPDeck:
         raise ValueError(f"No se pudo extraer el slug de la URL: {url}")
     slug = m.group(1).strip("/")
 
-    r = http_get(_DOTGG_DECK_API.format(slug=slug), headers=_HEADERS, timeout=15)
-    r.raise_for_status()
-    deck_data = r.json()
+    deck_data = fetch_dotgg_deck_data(
+        "onepiece",
+        slug,
+        headers=_HEADERS,
+        timeout=15,
+        site_label="onepiece.gg",
+    )
 
-    r2 = http_get(_DOTGG_CARDS_API, headers=_HEADERS, timeout=30)
-    r2.raise_for_status()
-    raw = r2.json()
-    names = raw["names"]
-    cards_db: dict[str, dict] = {row[0]: dict(zip(names, row)) for row in raw["data"]}
+    cards_db, _ = load_dotgg_card_db("onepiece", headers=_HEADERS, timeout=30)
+    if any(cid not in cards_db for cid in deck_data.get("deck", {})):
+        try:
+            cards_db, _ = load_dotgg_card_db(
+                "onepiece", headers=_HEADERS, timeout=30, use_cache=False
+            )
+        except Exception:
+            pass
 
     cards: list[OPCard] = []
     for card_id, qty_str in deck_data["deck"].items():
@@ -174,16 +225,23 @@ def _scrape_dotgg(url: str) -> OPDeck:
         slug=slug,
         cards=cards,
         source="dotgg",
+        raw_data=deck_data,
     )
 
 
 # ── egmanevents ──────────────────────────────────────────────────────────
 
 
-def _egman_cards_db() -> dict[str, dict]:
+def _egman_cards_db(*, use_cache: bool = True) -> dict[str, dict]:
+    cache = get_global_cache()
+    if use_cache and (cached := cache.get("op:egman_cards_db")) is not None:
+        return cached  # type: ignore[no-any-return]
     r = http_get(_EGMAN_CARDS_API, headers=_HEADERS, timeout=20)
     r.raise_for_status()
-    return {c["card_code"]: c for c in r.json()}
+    db = {c["card_code"]: c for c in r.json()}
+    if use_cache:
+        cache.set("op:egman_cards_db", db)
+    return db
 
 
 def _egman_build_deck(
@@ -322,6 +380,130 @@ def _scrape_kaizoku(url: str) -> OPDeck:
     return _egman_build_deck(deck_map, cards_db, "direct", source="kaizoku")
 
 
+# ── onepiecetopdecks / gumgum / limitless ────────────────────────────────
+
+
+def _scrape_html_card_codes(
+    url: str,
+    default_name: str,
+    slug: str,
+    source: str,
+    *,
+    fetch_text_fn: Callable[..., str] | None = None,
+) -> OPDeck:
+    fetcher = fetch_text_fn or fetch_text
+    html_text = fetcher(url, headers=_HEADERS, timeout=15)
+    name = default_name
+    m_name = re.search(r"<h1[^>]*>(.*?)</h1>", html_text, re.IGNORECASE | re.DOTALL)
+    if m_name:
+        name = re.sub(r"<[^>]+>", "", m_name.group(1)).strip() or name
+
+    cards_found = _OP_CARD_CODE_RE.findall(html_text)
+    card_counts: dict[str, int] = {}
+    for c in cards_found:
+        c_up = c.upper()
+        card_counts[c_up] = card_counts.get(c_up, 0) + 1
+
+    cached_egman = get_global_cache().get("op:egman_cards_db") or {}
+    cards: list[OPCard] = []
+    for cid, cnt in card_counts.items():
+        meta = cached_egman.get(cid, {}) if isinstance(cached_egman, dict) else {}
+        is_leader = str(meta.get("category", "")).lower() == "leader"
+        raw_colors = meta.get("color", [])
+        colors = (
+            raw_colors if isinstance(raw_colors, list) else ([raw_colors] if raw_colors else [])
+        )
+        cards.append(
+            OPCard(
+                card_id=cid,
+                name=meta.get("name", cid),
+                quantity=cnt,
+                is_leader=is_leader,
+                colors=colors,
+            )
+        )
+    return OPDeck(name=name, slug=slug, cards=cards, source=source)
+
+
+def _scrape_optopdecks(
+    url_or_slug: str,
+    *,
+    fetch_text_fn: Callable[..., str] | None = None,
+) -> OPDeck:
+    m = _OPTD_RE.search(url_or_slug)
+    slug = m.group(1) if m else url_or_slug.rstrip("/").split("/")[-1]
+    url = (
+        url_or_slug
+        if url_or_slug.startswith("http")
+        else f"https://onepiecetopdecks.com/deck-list/{url_or_slug}"
+    )
+    return _scrape_html_card_codes(
+        url,
+        "OnePieceTopDecks Deck",
+        slug,
+        "onepiecetopdecks",
+        fetch_text_fn=fetch_text_fn,
+    )
+
+
+def _scrape_gumgum(
+    url_or_id: str,
+    *,
+    fetch_json_fn: Callable[..., Any] | None = None,
+) -> OPDeck:
+    m = _GUMGUM_RE.search(url_or_id)
+    deck_id = m.group(1) if m else url_or_id.rstrip("/").split("/")[-1]
+    url = url_or_id if url_or_id.startswith("http") else f"https://gumgum.gg/decks/{url_or_id}"
+    fetcher = fetch_json_fn or fetch_json
+    data = fetcher(url, headers=_HEADERS, timeout=15)
+    name = data.get("name", "GumGum Deck")
+    cards: list[OPCard] = []
+    for c in data.get("cards", []):
+        cid = c.get("card_id", c.get("id", ""))
+        is_leader = bool(c.get("is_leader")) or str(c.get("category", "")).lower() == "leader"
+        raw_colors = c.get("colors", c.get("color", []))
+        colors = (
+            raw_colors if isinstance(raw_colors, list) else ([raw_colors] if raw_colors else [])
+        )
+        cards.append(
+            OPCard(
+                card_id=cid,
+                name=c.get("name", cid),
+                quantity=int(c.get("quantity", c.get("count", 1))),
+                is_leader=is_leader,
+                colors=colors,
+            )
+        )
+    return OPDeck(
+        name=name,
+        slug=deck_id,
+        cards=cards,
+        source="gumgum",
+        raw_data=data,
+    )
+
+
+def _scrape_limitless(
+    url_or_id: str,
+    *,
+    fetch_text_fn: Callable[..., str] | None = None,
+) -> OPDeck:
+    m = _LIMITLESS_RE.search(url_or_id)
+    deck_id = m.group(1) if m else url_or_id.rstrip("/").split("/")[-1]
+    url = (
+        url_or_id
+        if url_or_id.startswith("http")
+        else f"https://play.limitlesstcg.com/decks/{url_or_id}"
+    )
+    return _scrape_html_card_codes(
+        url,
+        "Limitless Deck",
+        deck_id,
+        "limitless",
+        fetch_text_fn=fetch_text_fn,
+    )
+
+
 # ── Image download ─────────────────────────────────────────────────────────
 
 
@@ -332,7 +514,6 @@ def download_images(
     progress_cb: ProgressCallback = None,
 ) -> dict[str, Path]:
     """Download one image per unique card. Returns {card_id: local_path}."""
-    dest_dir.mkdir(parents=True, exist_ok=True)
     url_func = _IMAGE_URL_FUNC_BY_SOURCE.get(
         deck.source,
         lambda cid: _DOTGG_IMAGE_URL.format(card_id=cid),
@@ -340,53 +521,27 @@ def download_images(
     ext = _IMAGE_EXT_BY_SOURCE.get(deck.source, "webp")
     extra_headers = _IMAGE_EXTRA_HEADERS_BY_SOURCE.get(deck.source, {})
     req_headers = {**_HEADERS, **extra_headers}
-    done = 0
+    urls = {card.card_id: url_func(card.card_id) for card in deck.cards}
 
-    def _fetch(card: OPCard) -> tuple[str, Path]:
-        if cancel_event and cancel_event.is_set():
-            raise Cancelled()
-        path = dest_dir / f"{card.card_id}.{ext}"
-        if path.exists():
-            return card.card_id, path
-        url = url_func(card.card_id)
-        try:
-            if cancel_event and cancel_event.is_set():
-                raise Cancelled()
-            r = requests.get(url, headers=req_headers, timeout=20)
-            r.raise_for_status()
-            path.write_bytes(r.content)
-            return card.card_id, path
-        except requests.exceptions.HTTPError as exc:
-            if exc.response is None or exc.response.status_code != 404:
-                raise
-        # Primary source returned 404 — fall back to kaizoku CDN (covers all sets)
-        fb_path = dest_dir / f"{card.card_id}.png"
-        if fb_path.exists():
-            return card.card_id, fb_path
-        if cancel_event and cancel_event.is_set():
-            raise Cancelled()
-        fb_r = requests.get(
-            _kaizoku_img(card.card_id),
-            headers={**_HEADERS, "Referer": _KAIZOKU_REFERER},
-            timeout=20,
+    def _path_for_key(card_id: str, _url: str) -> Path:
+        return dest_dir / f"{card_id}.{ext}"
+
+    def _fallback_for_key(card_id: str) -> tuple[str, Path, dict[str, str]]:
+        return (
+            _kaizoku_img(card_id),
+            dest_dir / f"{card_id}.png",
+            {**_HEADERS, "Referer": _KAIZOKU_REFERER},
         )
-        fb_r.raise_for_status()
-        fb_path.write_bytes(fb_r.content)
-        return card.card_id, fb_path
 
-    image_map: dict[str, Path] = {}
-    with ThreadPoolExecutor(max_workers=5) as ex:
-        futs = {ex.submit(_fetch, c): c for c in deck.cards}
-        for fut in as_completed(futs):
-            if cancel_event and cancel_event.is_set():
-                raise Cancelled()
-            card_id, path = fut.result()
-            image_map[card_id] = path
-            done += 1
-            if progress_cb:
-                progress_cb(done, len(deck.cards))
-
-    return image_map
+    return download_url_images(
+        urls,
+        dest_dir,
+        _path_for_key,
+        req_headers,
+        cancel_event=cancel_event,
+        progress_cb=progress_cb,
+        fallback_for_key=_fallback_for_key,
+    )
 
 
 # ── Deck expansion ────────────────────────────────────────────────────────

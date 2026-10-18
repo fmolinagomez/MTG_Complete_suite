@@ -940,3 +940,50 @@ class TestMultiGameFetchDeck:
         assert len(deck.cards) == 1
         assert deck.cards[0].collector_number == "OP01-004"
         assert deck.cards[0].quantity == 4
+
+    def test_yugioh_detect_fetch_and_parse(self):
+        from src.deck_importer import detect_game, fetch_deck, get_adapter, parse_deck_list
+        from src.ygo_scraper import YGOCard, YGODeck
+
+        adapter = get_adapter("yugioh")
+        assert adapter is not None
+        assert adapter.display_name == "Yu-Gi-Oh!"
+        assert detect_game("ydke://B0vXAQtL1wE=!!!") == "yugioh"
+        assert detect_game("https://ygoprodeck.com/deck/blue-eyes-123") == "yugioh"
+        assert detect_game("https://www.masterduelmeta.com/top-decks/abc") == "yugioh"
+        assert detect_game("https://www.yugiohmeta.com/top-decks/abc") == "yugioh"
+        assert detect_game("https://edisonformat.net/deckbuilder?event=a&deck=b") == "yugioh"
+        assert detect_game("#created by ydk\n#main\n89631139\n#extra\n!side") == "yugioh"
+
+        mock_ygo = YGODeck(
+            name="Blue-Eyes Deck",
+            deck_id="ygo-1",
+            cards=[
+                YGOCard(89631139, "Blue-Eyes White Dragon", 3, "main"),
+                YGOCard(23995346, "Blue-Eyes Ultimate Dragon", 1, "extra"),
+            ],
+        )
+        with patch("src.ygo_scraper.scrape_deck", return_value=mock_ygo):
+            fetched = fetch_deck("https://ygoprodeck.com/deck/blue-eyes-123")
+        assert fetched.name == "Blue-Eyes Deck"
+        assert fetched.game == "yugioh"
+        assert len(fetched.cards) == 2
+        assert fetched.cards[0].collector_number == "89631139"
+        assert fetched.cards[0].quantity == 3
+        assert "89631139.jpg" in fetched.cards[0].image_url
+
+        ydk_text = "# name: Goat Control\n#main\n89631139\n89631139\n#extra\n23995346\n!side\n"
+        with patch(
+            "src.ygo_scraper._fetch_names",
+            return_value={
+                89631139: "Blue-Eyes White Dragon",
+                23995346: "Blue-Eyes Ultimate Dragon",
+            },
+        ):
+            parsed = parse_deck_list(ydk_text, game="auto")
+        assert parsed.game == "yugioh"
+        assert parsed.name == "Goat Control"
+        assert [(c.name, c.quantity, c.zone) for c in parsed.cards] == [
+            ("Blue-Eyes White Dragon", 2, "main"),
+            ("Blue-Eyes Ultimate Dragon", 1, "extra"),
+        ]

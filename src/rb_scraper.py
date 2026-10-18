@@ -13,7 +13,12 @@ import requests  # noqa: F401 - retained as the scraper's test transport seam
 
 from src.constants import ProgressCallback
 from src.http_client import get as http_get
-from src.scraper_utils import download_url_images, generate_fallback_back
+from src.scraper_utils import (
+    download_url_images,
+    fetch_dotgg_deck_data,
+    load_dotgg_card_db,
+    resolve_card_back,
+)
 from src.scraper_utils import resources_dir as _resources_dir
 
 _HEADERS = {
@@ -106,13 +111,14 @@ def get_rb_backs() -> dict[str, Path]:
       white.png → rune
     Falls back to generated placeholder images when files are missing.
     """
-    rb_dir = _resources_dir() / "backs" / "riftbound"
+    res = _resources_dir()
+    rb_dir = res / "backs" / "riftbound"
     black = rb_dir / "black.png"
     blue = rb_dir / "blue.png"
     white = rb_dir / "white.png"
 
     def _get(path: Path, fallback_key: str) -> Path:
-        return path if path.exists() else _generate_fallback_back(fallback_key)
+        return path if path.exists() else _generate_fallback_back(fallback_key, res_dir=res)
 
     return {
         "legend": _get(black, "legend"),
@@ -130,12 +136,15 @@ _FALLBACK_COLORS: dict[str, tuple[str, str]] = {
 }
 
 
-def _generate_fallback_back(section: str) -> Path:
-    import tempfile
-
-    tmp = Path(tempfile.mkdtemp())
+def _generate_fallback_back(section: str, res_dir: Path | None = None) -> Path:
     bg, border = _FALLBACK_COLORS.get(section, ("#111111", "#888888"))
-    return generate_fallback_back(tmp / f"{section}.png", bg, border)
+    return resolve_card_back(
+        "riftbound",
+        section,
+        bg=bg,
+        border=border,
+        res_dir=res_dir if res_dir is not None else _resources_dir(),
+    )
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
@@ -199,22 +208,22 @@ def _scrape_riftbound_gg(url: str) -> RBDeck:
         )
     slug = m.group(1).strip("/")
 
-    r = http_get(_RBGG_DECK_API.format(slug=slug), headers=_HEADERS, timeout=20)
-    r.raise_for_status()
-    body = r.text.strip()
-    if not body:
-        raise ValueError(
-            f"El mazo '{slug}' no está disponible en riftbound.gg.\n"
-            "Puede ser privado, haber sido eliminado, o no existir.\n"
-            "Asegúrate de que la URL sea correcta y el mazo sea público."
-        )
-    deck_data = r.json()
+    deck_data = fetch_dotgg_deck_data(
+        "riftbound",
+        slug,
+        headers=_HEADERS,
+        timeout=20,
+        site_label="riftbound.gg",
+    )
 
-    r2 = http_get(_RBGG_CARDS_API, headers=_HEADERS, timeout=30)
-    r2.raise_for_status()
-    raw = r2.json()
-    names = raw["names"]
-    cards_db: dict[str, dict] = {row[0]: dict(zip(names, row)) for row in raw["data"]}
+    cards_db, _ = load_dotgg_card_db("riftbound", headers=_HEADERS, timeout=30)
+    if any(code not in cards_db for code in deck_data.get("deck", {})):
+        try:
+            cards_db, _ = load_dotgg_card_db(
+                "riftbound", headers=_HEADERS, timeout=30, use_cache=False
+            )
+        except Exception:
+            pass
 
     cards: list[RBCard] = []
 
