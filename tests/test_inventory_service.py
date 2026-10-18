@@ -1108,3 +1108,186 @@ class TestInventoryService:
         assert deck_info2 is not None
         c1 = next(c for c in deck_info2[1] if c.set_code == "set" and c.collector_number == "1")
         assert c1.quantity_required == 2
+        assert c1.physical_quantity == 2
+        assert c1.proxy_quantity == 0
+        assert c1.fulfilled_card_id == id1
+        assert c1.is_proxy is False
+
+    def test_batch_assign_to_deck_available_mode_and_proxy_invariants(
+        self, service: InventoryService
+    ):
+        # 3 physical copies of Card A, 2 proxy copies of Card B
+        id_phys = service.add_or_update_card(
+            InventoryCard(
+                oracle_id="orc-a",
+                name="Card A",
+                set_code="set",
+                collector_number="1",
+                quantity=3,
+                is_proxy=False,
+            )
+        )
+        id_proxy = service.add_or_update_card(
+            InventoryCard(
+                oracle_id="orc-b",
+                name="Card B",
+                set_code="set",
+                collector_number="2",
+                quantity=2,
+                is_proxy=True,
+            )
+        )
+
+        # Deck 1 already uses 1 physical copy of Card A
+        service.register_deck(
+            DeckRecord(name="Deck 1"),
+            [
+                DeckCardEntry(
+                    deck_id=0,
+                    oracle_id="orc-a",
+                    name="Card A",
+                    set_code="set",
+                    collector_number="1",
+                    quantity_required=1,
+                    is_proxy=False,
+                )
+            ],
+        )
+
+        # Assign available copies to Deck 2
+        deck2_id = service.register_deck(DeckRecord(name="Deck 2"), cards=[])
+        assigned = service.batch_assign_to_deck(
+            deck2_id, [id_phys, id_proxy], copies_mode="available"
+        )
+        assert assigned == 2
+
+        deck2_info = service.get_deck_by_id(deck2_id)
+        assert deck2_info is not None
+        _, d2_cards = deck2_info
+        card_a = next(c for c in d2_cards if c.name == "Card A")
+        card_b = next(c for c in d2_cards if c.name == "Card B")
+
+        # Card A had 3 total - 1 in Deck 1 = 2 available physical copies
+        assert card_a.quantity_required == 2
+        assert card_a.physical_quantity == 2
+        assert card_a.proxy_quantity == 0
+        assert card_a.fulfilled_card_id == id_phys
+        assert card_a.is_proxy is False
+
+        # Card B is a proxy in inventory -> assigned as proxy in deck
+        assert card_b.quantity_required == 2
+        assert card_b.physical_quantity == 0
+        assert card_b.proxy_quantity == 2
+        assert card_b.fulfilled_card_id is None
+        assert card_b.is_proxy is True
+
+    def test_dfc_and_apostrophe_matching_in_deck_usages_and_checks(self, service: InventoryService):
+        id_dfc = service.add_or_update_card(
+            InventoryCard(
+                oracle_id="",
+                name="Delver of Secrets",
+                set_code="isd",
+                collector_number="51",
+                quantity=1,
+            )
+        )
+        id_apos = service.add_or_update_card(
+            InventoryCard(
+                oracle_id="",
+                name="Urza's Saga",
+                set_code="mh2",
+                collector_number="259",
+                quantity=1,
+            )
+        )
+
+        service.register_deck(
+            DeckRecord(name="Legacy Delver", format="Legacy"),
+            [
+                DeckCardEntry(
+                    deck_id=0,
+                    oracle_id="",
+                    name="Delver of Secrets // Insectile Aberration",
+                    set_code="isd",
+                    collector_number="51",
+                    quantity_required=4,
+                ),
+                DeckCardEntry(
+                    deck_id=0,
+                    oracle_id="",
+                    name="Urza’s Saga",
+                    set_code="mh2",
+                    collector_number="259",
+                    quantity_required=2,
+                ),
+            ],
+        )
+
+        deck_map = service.check_cards_in_decks([id_dfc, id_apos])
+        assert deck_map[id_dfc] == ["Legacy Delver"]
+        assert deck_map[id_apos] == ["Legacy Delver"]
+
+        dfc_usages = service.get_card_deck_usages(card_name="Delver of Secrets")
+        assert len(dfc_usages) == 1
+        assert dfc_usages[0]["deck_name"] == "Legacy Delver"
+        assert dfc_usages[0]["quantity_required"] == 4
+
+        apos_usages = service.get_card_deck_usages(card_name="Urza's Saga")
+        assert len(apos_usages) == 1
+        assert apos_usages[0]["deck_name"] == "Legacy Delver"
+        assert apos_usages[0]["quantity_required"] == 2
+
+    def test_get_inventory_cards_with_usage_foil_spanish_filters_and_sorting(
+        self, service: InventoryService
+    ):
+        service.add_or_update_card(
+            InventoryCard(
+                oracle_id="orc-1",
+                name="Card B",
+                set_code="mh2",
+                collector_number="10",
+                quantity=4,
+                is_foil=True,
+                metadata_json='{"rarity": "mythic"}',
+            )
+        )
+        service.add_or_update_card(
+            InventoryCard(
+                oracle_id="orc-2",
+                name="Card A",
+                set_code="lea",
+                collector_number="2",
+                quantity=1,
+                is_foil=False,
+                metadata_json='{"rarity": "common"}',
+            )
+        )
+
+        # Filter foil
+        foil_res = service.get_inventory_cards_with_usage(filter_foil=True)
+        assert len(foil_res) == 1
+        assert foil_res[0][0].name == "Card B"
+
+        non_foil_res = service.get_inventory_cards_with_usage(filter_foil=False)
+        assert len(non_foil_res) == 1
+        assert non_foil_res[0][0].name == "Card A"
+
+        # Spanish filter labels normalized in domain
+        mythic_res = service.get_inventory_cards_with_usage(
+            filter_rarity="Mítica",
+            filter_set="Todas las ediciones",
+            filter_usage="Solo Disponibles (libres)",
+        )
+        assert len(mythic_res) == 1
+        assert mythic_res[0][0].name == "Card B"
+
+        # Sorting by collector_number ascending and descending
+        sorted_asc = service.get_inventory_cards_with_usage(
+            sort_by="collector_number", sort_descending=False
+        )
+        assert [c.collector_number for c, _, _ in sorted_asc] == ["2", "10"]
+
+        sorted_desc = service.get_inventory_cards_with_usage(
+            sort_by="collector_number", sort_descending=True
+        )
+        assert [c.collector_number for c, _, _ in sorted_desc] == ["10", "2"]

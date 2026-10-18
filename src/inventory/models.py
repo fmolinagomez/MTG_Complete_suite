@@ -89,3 +89,41 @@ class DeckCardMatchDetail:
     assigned_version_id: int | None = None
     physical_quantity: int = 0
     proxy_quantity: int = 0
+
+    def max_physical_for_version(self, version_id: int | None = None) -> int:
+        """Return the maximum physical copies available for a specific version or auto-pool."""
+        if version_id is not None:
+            target = next(
+                (v for v in self.available_versions if v.get("card_id") == version_id),
+                None,
+            )
+            avail = int(target["quantity_available"]) if target else 0
+        elif self.available_versions:
+            avail = sum(int(v.get("quantity_available", 0)) for v in self.available_versions)
+        else:
+            avail = self.exact_stock + self.alt_stock
+        return max(0, min(self.quantity_required, avail))
+
+    def resolve_proxy_toggle(self) -> tuple[int, int, int | None]:
+        """Compute (physical_quantity, proxy_quantity, fulfilled_card_id) when toggling proxy mode."""
+        if self.physical_quantity > 0:
+            return 0, self.quantity_required, self.assigned_version_id
+        new_phys = self.max_physical_for_version(self.assigned_version_id)
+        return new_phys, self.quantity_required - new_phys, self.assigned_version_id
+
+    def resolve_version_selection(self, target_card_id: int | None) -> tuple[int, int, int | None]:
+        """Compute (physical_quantity, proxy_quantity, fulfilled_card_id) when selecting a version.
+
+        Pass target_card_id=-1 for forced proxy ('Ninguna'), None for auto-combination,
+        or a positive inventory card ID for a specific print.
+        """
+        if target_card_id == -1:
+            return 0, self.quantity_required, None
+        new_phys = self.max_physical_for_version(target_card_id)
+        return new_phys, self.quantity_required - new_phys, target_card_id
+
+    def resolve_physical_quantity(self, requested_physical: int) -> tuple[int, int, int | None]:
+        """Clamp a requested physical copy count and return (physical_qty, proxy_qty, fulfilled_card_id)."""
+        max_limit = self.max_physical_for_version(self.assigned_version_id)
+        new_phys = max(0, min(max_limit, int(requested_physical)))
+        return new_phys, self.quantity_required - new_phys, self.assigned_version_id

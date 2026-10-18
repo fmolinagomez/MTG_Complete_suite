@@ -2,12 +2,24 @@
 
 from __future__ import annotations
 
+import sqlite3
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.inventory.allocation_engine import StockAllocationEngine
+from src.inventory.allocation_engine import (
+    AllocationPolicy,
+    StockAllocationEngine,
+    card_usage_sort_key,
+    cards_match,
+    names_match,
+    normalize_card_name,
+    normalize_rarity_filter,
+    normalize_set_filter,
+    normalize_usage_filter,
+)
 from src.inventory.db import DEFAULT_DB_PATH, get_db, init_db
-from src.inventory.manabox_csv import import_parsed_cards, parse_manabox_csv
+from src.inventory.manabox_csv import parse_manabox_csv
 from src.inventory.models import (
     DeckCardEntry,
     DeckCardMatchDetail,
@@ -15,6 +27,161 @@ from src.inventory.models import (
     InventoryCard,
     MissingProxyPlan,
 )
+
+
+def _row_to_inventory_card(row: sqlite3.Row) -> InventoryCard:
+    """Hydrate an InventoryCard from a database row."""
+    return InventoryCard(
+        id=row["id"],
+        oracle_id=row["oracle_id"],
+        name=row["name"],
+        set_code=row["set_code"],
+        collector_number=row["collector_number"],
+        quantity=int(row["quantity"]),
+        is_foil=bool(row["is_foil"]),
+        is_proxy=bool(row["is_proxy"]),
+        condition=row["condition"],
+        language=row["language"],
+        metadata_json=row["metadata_json"],
+    )
+
+
+def _row_to_deck_record(row: sqlite3.Row) -> DeckRecord:
+    """Hydrate a DeckRecord from a database row."""
+    return DeckRecord(
+        id=row["id"],
+        name=row["name"],
+        source_url=row["source_url"],
+        format=row["format"],
+        created_at=row["created_at"],
+        notes=row["notes"],
+    )
+
+
+def _row_to_deck_card_entry(row: sqlite3.Row) -> DeckCardEntry:
+    """Hydrate a DeckCardEntry from a database row."""
+    return DeckCardEntry(
+        id=row["id"],
+        deck_id=row["deck_id"],
+        oracle_id=row["oracle_id"],
+        name=row["name"],
+        set_code=row["set_code"],
+        collector_number=row["collector_number"],
+        quantity_required=int(row["quantity_required"]),
+        is_proxy=bool(row["is_proxy"]),
+        physical_quantity=int(row["physical_quantity"] or 0),
+        proxy_quantity=int(row["proxy_quantity"] or 0),
+        fulfilled_card_id=row["fulfilled_card_id"],
+    )
+
+
+def _insert_card_in_tx(conn: sqlite3.Connection, card: InventoryCard) -> int:
+    """Insert a new InventoryCard row inside an active transaction."""
+    cursor = conn.execute(
+        """
+        INSERT INTO inventory_cards (
+            oracle_id, name, set_code, collector_number, quantity,
+            is_foil, is_proxy, condition, language, metadata_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            card.oracle_id,
+            card.name,
+            card.set_code,
+            card.collector_number,
+            card.quantity,
+            1 if card.is_foil else 0,
+            1 if card.is_proxy else 0,
+            card.condition,
+            card.language,
+            card.metadata_json,
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def _upsert_card_in_tx(
+    conn: sqlite3.Connection,
+    card: InventoryCard,
+    *,
+    accumulate_quantity: bool = True,
+) -> int:
+    """Insert or update an InventoryCard row inside an active transaction."""
+    if card.id is not None:
+        existing = conn.execute(
+            "SELECT id FROM inventory_cards WHERE id = ?", (card.id,)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE inventory_cards SET
+                    oracle_id = ?,
+                    name = ?,
+                    set_code = ?,
+                    collector_number = ?,
+                    quantity = ?,
+                    is_foil = ?,
+                    is_proxy = ?,
+                    condition = ?,
+                    language = ?,
+                    metadata_json = ?
+                WHERE id = ?
+                """,
+                (
+                    card.oracle_id,
+                    card.name,
+                    card.set_code,
+                    card.collector_number,
+                    card.quantity,
+                    1 if card.is_foil else 0,
+                    1 if card.is_proxy else 0,
+                    card.condition,
+                    card.language,
+                    card.metadata_json,
+                    card.id,
+                ),
+            )
+            return card.id
+
+    row = conn.execute(
+        """
+        SELECT id, quantity FROM inventory_cards
+        WHERE set_code = ? AND collector_number = ? AND is_foil = ? AND is_proxy = ?
+        """,
+        (
+            card.set_code,
+            card.collector_number,
+            1 if card.is_foil else 0,
+            1 if card.is_proxy else 0,
+        ),
+    ).fetchone()
+
+    if row:
+        new_qty = (int(row["quantity"]) + card.quantity) if accumulate_quantity else card.quantity
+        conn.execute(
+            """
+            UPDATE inventory_cards SET
+                oracle_id = ?,
+                name = ?,
+                quantity = ?,
+                condition = ?,
+                language = ?,
+                metadata_json = ?
+            WHERE id = ?
+            """,
+            (
+                card.oracle_id,
+                card.name,
+                new_qty,
+                card.condition,
+                card.language,
+                card.metadata_json,
+                row["id"],
+            ),
+        )
+        return int(row["id"])
+
+    return _insert_card_in_tx(conn, card)
 
 
 class InventoryService:
@@ -29,10 +196,31 @@ class InventoryService:
         init_db(self.db_path)
         self.allocation_engine = allocation_engine or StockAllocationEngine()
 
+    def import_cards(
+        self,
+        cards: Sequence[InventoryCard],
+        mode: str = "merge",
+    ) -> int:
+        """Import a collection of InventoryCard items using 'merge' or 'replace' mode."""
+        mode_clean = mode.strip().lower()
+        if mode_clean not in ("replace", "merge"):
+            raise ValueError("Modo de importación no válido: debe ser 'merge' o 'replace'")
+
+        with get_db(self.db_path) as conn:
+            if mode_clean == "replace":
+                conn.execute("DELETE FROM inventory_cards WHERE is_proxy = 0")
+                for card in cards:
+                    _insert_card_in_tx(conn, card)
+            else:
+                for card in cards:
+                    _upsert_card_in_tx(conn, card, accumulate_quantity=False)
+
+        return sum(c.quantity for c in cards)
+
     def import_manabox_csv(self, csv_path: Path | str, mode: str = "merge") -> int:
         """Parse and import a ManaBox CSV export into the collection."""
         cards = parse_manabox_csv(csv_path)
-        return import_parsed_cards(cards, db_path=self.db_path, mode=mode)
+        return self.import_cards(cards, mode=mode)
 
     def get_inventory_cards(
         self,
@@ -68,22 +256,7 @@ class InventoryService:
         with get_db(self.db_path) as conn:
             rows = conn.execute(sql, params).fetchall()
 
-        return [
-            InventoryCard(
-                id=row["id"],
-                oracle_id=row["oracle_id"],
-                name=row["name"],
-                set_code=row["set_code"],
-                collector_number=row["collector_number"],
-                quantity=row["quantity"],
-                is_foil=bool(row["is_foil"]),
-                is_proxy=bool(row["is_proxy"]),
-                condition=row["condition"],
-                language=row["language"],
-                metadata_json=row["metadata_json"],
-            )
-            for row in rows
-        ]
+        return [_row_to_inventory_card(row) for row in rows]
 
     def get_card_by_id(self, card_id: int) -> InventoryCard | None:
         """Fetch a single inventory card by its primary key ID."""
@@ -97,122 +270,12 @@ class InventoryService:
                 (card_id,),
             ).fetchone()
 
-        if not row:
-            return None
-
-        return InventoryCard(
-            id=row["id"],
-            oracle_id=row["oracle_id"],
-            name=row["name"],
-            set_code=row["set_code"],
-            collector_number=row["collector_number"],
-            quantity=row["quantity"],
-            is_foil=bool(row["is_foil"]),
-            is_proxy=bool(row["is_proxy"]),
-            condition=row["condition"],
-            language=row["language"],
-            metadata_json=row["metadata_json"],
-        )
+        return _row_to_inventory_card(row) if row else None
 
     def add_or_update_card(self, card: InventoryCard) -> int:
         """Insert or update a card in the inventory database."""
         with get_db(self.db_path) as conn:
-            if card.id is not None:
-                existing = conn.execute(
-                    "SELECT id FROM inventory_cards WHERE id = ?", (card.id,)
-                ).fetchone()
-                if existing:
-                    conn.execute(
-                        """
-                        UPDATE inventory_cards SET
-                            oracle_id = ?,
-                            name = ?,
-                            set_code = ?,
-                            collector_number = ?,
-                            quantity = ?,
-                            is_foil = ?,
-                            is_proxy = ?,
-                            condition = ?,
-                            language = ?,
-                            metadata_json = ?
-                        WHERE id = ?
-                        """,
-                        (
-                            card.oracle_id,
-                            card.name,
-                            card.set_code,
-                            card.collector_number,
-                            card.quantity,
-                            1 if card.is_foil else 0,
-                            1 if card.is_proxy else 0,
-                            card.condition,
-                            card.language,
-                            card.metadata_json,
-                            card.id,
-                        ),
-                    )
-                    return card.id
-
-            # If no ID provided, check for existing identical print and finish
-            row = conn.execute(
-                """
-                SELECT id, quantity FROM inventory_cards
-                WHERE set_code = ? AND collector_number = ? AND is_foil = ? AND is_proxy = ?
-                """,
-                (
-                    card.set_code,
-                    card.collector_number,
-                    1 if card.is_foil else 0,
-                    1 if card.is_proxy else 0,
-                ),
-            ).fetchone()
-
-            if row:
-                new_qty = row["quantity"] + card.quantity
-                conn.execute(
-                    """
-                    UPDATE inventory_cards SET
-                        oracle_id = ?,
-                        name = ?,
-                        quantity = ?,
-                        condition = ?,
-                        language = ?,
-                        metadata_json = ?
-                    WHERE id = ?
-                    """,
-                    (
-                        card.oracle_id,
-                        card.name,
-                        new_qty,
-                        card.condition,
-                        card.language,
-                        card.metadata_json,
-                        row["id"],
-                    ),
-                )
-                return int(row["id"])
-
-            cursor = conn.execute(
-                """
-                INSERT INTO inventory_cards (
-                    oracle_id, name, set_code, collector_number, quantity,
-                    is_foil, is_proxy, condition, language, metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    card.oracle_id,
-                    card.name,
-                    card.set_code,
-                    card.collector_number,
-                    card.quantity,
-                    1 if card.is_foil else 0,
-                    1 if card.is_proxy else 0,
-                    card.condition,
-                    card.language,
-                    card.metadata_json,
-                ),
-            )
-            return int(cursor.lastrowid)
+            return _upsert_card_in_tx(conn, card, accumulate_quantity=True)
 
     def delete_card(self, card_id: int) -> bool:
         """Delete an inventory card by ID."""
@@ -221,10 +284,7 @@ class InventoryService:
             return cursor.rowcount > 0
 
     def batch_delete_cards(self, card_ids: list[int]) -> int:
-        """Delete multiple inventory cards by ID in a single transaction.
-
-        Returns the number of deleted records.
-        """
+        """Delete multiple inventory cards by ID in a single transaction."""
         if not card_ids:
             return 0
         with get_db(self.db_path) as conn:
@@ -238,7 +298,7 @@ class InventoryService:
     def check_cards_in_decks(self, card_ids: list[int]) -> dict[int, list[str]]:
         """Check which cards are currently in use in registered decks.
 
-        Returns a dictionary mapping card_id -> list of deck names.
+        Uses canonical card identity matching (oracle_id, DFC names, apostrophes, and fulfilled_card_id).
         """
         if not card_ids:
             return {}
@@ -256,7 +316,7 @@ class InventoryService:
 
             deck_cards = conn.execute(
                 """
-                SELECT d.name AS deck_name, dc.oracle_id, LOWER(dc.name) AS lower_name
+                SELECT d.name AS deck_name, dc.oracle_id, dc.name, dc.fulfilled_card_id
                 FROM deck_cards dc
                 JOIN decks d ON d.id = dc.deck_id
                 """
@@ -265,10 +325,12 @@ class InventoryService:
             for c in cards:
                 cid = c["id"]
                 coid = (c["oracle_id"] or "").strip()
-                cname = (c["name"] or "").strip().lower()
+                cname = (c["name"] or "").strip()
                 matching_decks = set()
                 for dc in deck_cards:
-                    if (coid and dc["oracle_id"] == coid) or (cname and dc["lower_name"] == cname):
+                    if dc["fulfilled_card_id"] == cid or cards_match(
+                        coid, cname, dc["oracle_id"], dc["name"]
+                    ):
                         matching_decks.add(dc["deck_name"])
                 result[cid] = sorted(matching_decks)
 
@@ -290,8 +352,6 @@ class InventoryService:
         If updating is_proxy or is_foil causes a card to match an existing card
         with identical (set_code, collector_number, is_foil, is_proxy), quantities
         are merged into the existing card and the duplicate card row is deleted.
-
-        Returns the number of cards successfully updated or merged.
         """
         if not card_ids:
             return 0
@@ -331,7 +391,6 @@ class InventoryService:
                 else:
                     new_qty = cur_qty
 
-                # Check if there is an existing matching card with the target proxy/foil
                 existing = conn.execute(
                     """
                     SELECT id, quantity FROM inventory_cards
@@ -347,15 +406,13 @@ class InventoryService:
                 ).fetchone()
 
                 if existing:
-                    # Merge quantity into existing card and delete current card
-                    merged_qty = existing["quantity"] + new_qty
+                    merged_qty = int(existing["quantity"]) + new_qty
                     conn.execute(
                         "UPDATE inventory_cards SET quantity = ? WHERE id = ?",
                         (merged_qty, existing["id"]),
                     )
                     conn.execute("DELETE FROM inventory_cards WHERE id = ?", (cid,))
                 else:
-                    # Normal update
                     conn.execute(
                         """
                         UPDATE inventory_cards SET
@@ -385,16 +442,7 @@ class InventoryService:
         card_ids: list[int],
         copies_mode: str | int = "one",
     ) -> int:
-        """Batch assign inventory cards to a registered deck.
-
-        Args:
-            deck_id: Target deck ID.
-            card_ids: List of inventory card IDs to assign.
-            copies_mode: 'one' (1 copy), 'available' (all available copies), or an integer count.
-
-        Returns:
-            Number of cards assigned or incremented.
-        """
+        """Batch assign inventory cards to a registered deck while enforcing ADR-0003 split invariants."""
         if not card_ids:
             return 0
 
@@ -405,29 +453,46 @@ class InventoryService:
                 raise ValueError(f"Deck with id {deck_id} does not exist.")
 
             placeholders = ",".join("?" for _ in card_ids)
-            cards = conn.execute(
+            card_rows = conn.execute(
                 f"""
-                SELECT id, oracle_id, name, set_code, collector_number, quantity, is_proxy
+                SELECT id, oracle_id, name, set_code, collector_number,
+                       quantity, is_foil, is_proxy, condition, language, metadata_json
                 FROM inventory_cards
                 WHERE id IN ({placeholders})
                 """,
                 card_ids,
             ).fetchall()
 
-            for card in cards:
+            avail_by_card_id: dict[int, int] = {}
+            if copies_mode == "available" and card_rows:
+                all_inv_rows = conn.execute(
+                    """
+                    SELECT id, oracle_id, name, set_code, collector_number,
+                           quantity, is_foil, is_proxy, condition, language, metadata_json
+                    FROM inventory_cards
+                    """
+                ).fetchall()
+                all_dc_rows = conn.execute(
+                    """
+                    SELECT id, deck_id, oracle_id, name, set_code, collector_number,
+                           quantity_required, is_proxy, physical_quantity, proxy_quantity, fulfilled_card_id
+                    FROM deck_cards
+                    ORDER BY id ASC
+                    """
+                ).fetchall()
+                _, avail_by_card_id = self.allocation_engine.calculate_inventory_usage(
+                    [_row_to_inventory_card(r) for r in all_inv_rows],
+                    [_row_to_deck_card_entry(r) for r in all_dc_rows],
+                )
+
+            for card in card_rows:
+                cid = int(card["id"])
+                card_qty = int(card["quantity"])
+                card_is_proxy = bool(card["is_proxy"])
+
                 if copies_mode == "available":
-                    usages = conn.execute(
-                        """
-                        SELECT SUM(quantity_required) as total_used
-                        FROM deck_cards
-                        WHERE oracle_id = ? OR LOWER(name) = LOWER(?)
-                        """,
-                        (card["oracle_id"], card["name"]),
-                    ).fetchone()
-                    used = (
-                        int(usages["total_used"] or 0) if (usages and usages["total_used"]) else 0
-                    )
-                    copies = max(1, card["quantity"] - used)
+                    avail = avail_by_card_id.get(cid, card_qty)
+                    copies = max(1, avail)
                 elif isinstance(copies_mode, int):
                     copies = max(1, copies_mode)
                 else:
@@ -435,24 +500,74 @@ class InventoryService:
 
                 existing_dc = conn.execute(
                     """
-                    SELECT id, quantity_required FROM deck_cards
+                    SELECT id, quantity_required, is_proxy, physical_quantity, proxy_quantity, fulfilled_card_id
+                    FROM deck_cards
                     WHERE deck_id = ? AND set_code = ? AND collector_number = ?
                     """,
                     (deck_id, card["set_code"], card["collector_number"]),
                 ).fetchone()
 
                 if existing_dc:
+                    new_req = int(existing_dc["quantity_required"]) + copies
+                    cur_phys = int(existing_dc["physical_quantity"] or 0)
+                    cur_proxy = int(existing_dc["proxy_quantity"] or 0)
+                    cur_fulfilled = existing_dc["fulfilled_card_id"]
+
+                    if card_is_proxy:
+                        new_phys = cur_phys
+                        new_proxy = (
+                            cur_proxy + copies if (cur_phys > 0 or cur_proxy > 0) else new_req
+                        )
+                        new_is_proxy = 1 if new_phys <= 0 else 0
+                        new_fulfilled = cur_fulfilled
+                    else:
+                        base_phys = (
+                            cur_phys
+                            if (cur_phys > 0 or cur_proxy > 0 or existing_dc["is_proxy"])
+                            else int(existing_dc["quantity_required"])
+                        )
+                        new_phys = min(new_req, base_phys + copies)
+                        new_proxy = max(0, new_req - new_phys)
+                        new_is_proxy = 1 if new_phys <= 0 else 0
+                        new_fulfilled = cur_fulfilled if cur_fulfilled is not None else cid
+
                     conn.execute(
-                        "UPDATE deck_cards SET quantity_required = quantity_required + ? WHERE id = ?",
-                        (copies, existing_dc["id"]),
+                        """
+                        UPDATE deck_cards SET
+                            quantity_required = ?,
+                            is_proxy = ?,
+                            physical_quantity = ?,
+                            proxy_quantity = ?,
+                            fulfilled_card_id = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            new_req,
+                            new_is_proxy,
+                            new_phys,
+                            new_proxy,
+                            new_fulfilled,
+                            existing_dc["id"],
+                        ),
                     )
                 else:
+                    if card_is_proxy:
+                        phys_qty = 0
+                        proxy_qty = copies
+                        is_proxy_val = 1
+                        fulfilled_id = None
+                    else:
+                        phys_qty = min(copies, card_qty)
+                        proxy_qty = max(0, copies - phys_qty)
+                        is_proxy_val = 1 if phys_qty <= 0 else 0
+                        fulfilled_id = cid
+
                     conn.execute(
                         """
                         INSERT INTO deck_cards (
                             deck_id, oracle_id, name, set_code, collector_number,
-                            quantity_required, is_proxy
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                            quantity_required, is_proxy, physical_quantity, proxy_quantity, fulfilled_card_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             deck_id,
@@ -461,7 +576,10 @@ class InventoryService:
                             card["set_code"],
                             card["collector_number"],
                             copies,
-                            1 if card["is_proxy"] else 0,
+                            is_proxy_val,
+                            phys_qty,
+                            proxy_qty,
+                            fulfilled_id,
                         ),
                     )
                 assigned_count += 1
@@ -479,17 +597,7 @@ class InventoryService:
                 """
             ).fetchall()
 
-        return [
-            DeckRecord(
-                id=row["id"],
-                name=row["name"],
-                source_url=row["source_url"],
-                format=row["format"],
-                created_at=row["created_at"],
-                notes=row["notes"],
-            )
-            for row in rows
-        ]
+        return [_row_to_deck_record(row) for row in rows]
 
     def get_deck_by_id(self, deck_id: int) -> tuple[DeckRecord, list[DeckCardEntry]] | None:
         """Fetch a deck record and its associated card entries."""
@@ -505,14 +613,7 @@ class InventoryService:
             if not deck_row:
                 return None
 
-            deck = DeckRecord(
-                id=deck_row["id"],
-                name=deck_row["name"],
-                source_url=deck_row["source_url"],
-                format=deck_row["format"],
-                created_at=deck_row["created_at"],
-                notes=deck_row["notes"],
-            )
+            deck = _row_to_deck_record(deck_row)
 
             card_rows = conn.execute(
                 """
@@ -525,22 +626,7 @@ class InventoryService:
                 (deck_id,),
             ).fetchall()
 
-            cards = [
-                DeckCardEntry(
-                    id=row["id"],
-                    deck_id=row["deck_id"],
-                    oracle_id=row["oracle_id"],
-                    name=row["name"],
-                    set_code=row["set_code"],
-                    collector_number=row["collector_number"],
-                    quantity_required=row["quantity_required"],
-                    is_proxy=bool(row["is_proxy"]),
-                    physical_quantity=int(row["physical_quantity"] or 0),
-                    proxy_quantity=int(row["proxy_quantity"] or 0),
-                    fulfilled_card_id=row["fulfilled_card_id"],
-                )
-                for row in card_rows
-            ]
+            cards = [_row_to_deck_card_entry(row) for row in card_rows]
 
         return deck, cards
 
@@ -633,17 +719,14 @@ class InventoryService:
             cursor = conn.execute("DELETE FROM decks WHERE id = ?", (deck_id,))
             return cursor.rowcount > 0
 
-    def calculate_missing_proxies(
+    def _load_allocation_context(
         self,
-        deck_cards: list[DeckCardEntry],
-        allocate_mode: str = "exclusive",
-        current_deck_id: int | None = None,
-        include_proxies: bool = True,
-    ) -> MissingProxyPlan:
-        """Evaluate physical card and proxy availability vs deck requirements (Option C Stock Allocation)."""
-        if not deck_cards:
-            return MissingProxyPlan()
-
+        include_proxies: bool,
+        current_deck_id: int | None,
+        allocate_mode: AllocationPolicy | str,
+    ) -> tuple[list[InventoryCard], list[DeckCardEntry]]:
+        """Load inventory cards and competing deck cards for stock allocation."""
+        policy = AllocationPolicy.from_str(allocate_mode)
         with get_db(self.db_path) as conn:
             where_sql = (
                 "WHERE quantity > 0" if include_proxies else "WHERE is_proxy = 0 AND quantity > 0"
@@ -656,25 +739,10 @@ class InventoryService:
                 {where_sql}
                 """
             ).fetchall()
-            inventory_cards = [
-                InventoryCard(
-                    id=row["id"],
-                    oracle_id=row["oracle_id"],
-                    name=row["name"],
-                    set_code=row["set_code"],
-                    collector_number=row["collector_number"],
-                    quantity=row["quantity"],
-                    is_foil=bool(row["is_foil"]),
-                    is_proxy=bool(row["is_proxy"]),
-                    condition=row["condition"],
-                    language=row["language"],
-                    metadata_json=row["metadata_json"],
-                )
-                for row in rows
-            ]
+            inventory_cards = [_row_to_inventory_card(row) for row in rows]
 
             other_deck_cards: list[DeckCardEntry] = []
-            if allocate_mode == "exclusive":
+            if policy == AllocationPolicy.EXCLUSIVE:
                 deck_filter_clauses: list[str] = []
                 deck_params: list[object] = []
                 if not include_proxies:
@@ -686,32 +754,36 @@ class InventoryService:
                 deck_filter_sql = (
                     f"WHERE {' AND '.join(deck_filter_clauses)}" if deck_filter_clauses else ""
                 )
-
                 assigned_rows = conn.execute(
                     f"""
                     SELECT id, deck_id, oracle_id, name, set_code, collector_number,
                            quantity_required, is_proxy, physical_quantity, proxy_quantity, fulfilled_card_id
                     FROM deck_cards
                     {deck_filter_sql}
+                    ORDER BY id ASC
                     """,
                     deck_params,
                 ).fetchall()
-                other_deck_cards = [
-                    DeckCardEntry(
-                        id=r["id"],
-                        deck_id=r["deck_id"],
-                        oracle_id=r["oracle_id"],
-                        name=r["name"],
-                        set_code=r["set_code"],
-                        collector_number=r["collector_number"],
-                        quantity_required=r["quantity_required"],
-                        is_proxy=bool(r["is_proxy"]),
-                        physical_quantity=int(r["physical_quantity"] or 0),
-                        proxy_quantity=int(r["proxy_quantity"] or 0),
-                        fulfilled_card_id=r["fulfilled_card_id"],
-                    )
-                    for r in assigned_rows
-                ]
+                other_deck_cards = [_row_to_deck_card_entry(r) for r in assigned_rows]
+
+        return inventory_cards, other_deck_cards
+
+    def calculate_missing_proxies(
+        self,
+        deck_cards: list[DeckCardEntry],
+        allocate_mode: str = "exclusive",
+        current_deck_id: int | None = None,
+        include_proxies: bool = True,
+    ) -> MissingProxyPlan:
+        """Evaluate physical card and proxy availability vs deck requirements (Option C Stock Allocation)."""
+        if not deck_cards:
+            return MissingProxyPlan()
+
+        inventory_cards, other_deck_cards = self._load_allocation_context(
+            include_proxies=include_proxies,
+            current_deck_id=current_deck_id,
+            allocate_mode=allocate_mode,
+        )
 
         return self.allocation_engine.calculate_missing_proxies(
             deck_cards=deck_cards,
@@ -734,40 +806,19 @@ class InventoryService:
 
         with get_db(self.db_path) as conn:
             for entry in deck_cards:
-                row = conn.execute(
-                    """
-                    SELECT id, quantity FROM inventory_cards
-                    WHERE set_code = ? AND collector_number = ? AND is_foil = 0 AND is_proxy = ?
-                    """,
-                    (
-                        entry.set_code,
-                        entry.collector_number,
-                        1 if as_proxy else 0,
+                _upsert_card_in_tx(
+                    conn,
+                    InventoryCard(
+                        oracle_id=entry.oracle_id,
+                        name=entry.name,
+                        set_code=entry.set_code,
+                        collector_number=entry.collector_number,
+                        quantity=entry.quantity_required,
+                        is_foil=False,
+                        is_proxy=as_proxy,
                     ),
-                ).fetchone()
-
-                if row:
-                    conn.execute(
-                        "UPDATE inventory_cards SET quantity = quantity + ? WHERE id = ?",
-                        (entry.quantity_required, row["id"]),
-                    )
-                else:
-                    conn.execute(
-                        """
-                        INSERT INTO inventory_cards (
-                            oracle_id, name, set_code, collector_number, quantity,
-                            is_foil, is_proxy, condition, language, metadata_json
-                        ) VALUES (?, ?, ?, ?, ?, 0, ?, 'NM', 'en', '{}')
-                        """,
-                        (
-                            entry.oracle_id,
-                            entry.name,
-                            entry.set_code,
-                            entry.collector_number,
-                            entry.quantity_required,
-                            1 if as_proxy else 0,
-                        ),
-                    )
+                    accumulate_quantity=True,
+                )
 
         return sum(c.quantity_required for c in deck_cards)
 
@@ -810,60 +861,62 @@ class InventoryService:
         return [row["sc"] for row in rows if row["sc"]]
 
     def get_card_deck_usages(self, oracle_id: str = "", card_name: str = "") -> list[dict]:
-        """Find all deck usages for a card matching oracle_id or card_name."""
+        """Find all deck usages for a card matching oracle_id or DFC-tolerant card_name."""
         oid = oracle_id.strip()
         cname = card_name.strip()
         if not oid and not cname:
             return []
 
-        clauses: list[str] = []
-        params: list[object] = []
-
-        if oid and cname:
-            clauses.append("(dc.oracle_id = ? OR LOWER(dc.name) = LOWER(?))")
-            params.extend([oid, cname])
-        elif oid:
-            clauses.append("dc.oracle_id = ?")
-            params.append(oid)
-        elif cname:
-            clauses.append("LOWER(dc.name) = LOWER(?)")
-            params.append(cname)
-
-        sql = f"""
+        sql = """
             SELECT d.id AS deck_id, d.name AS deck_name, d.format AS format,
+                   dc.oracle_id, dc.name AS card_name,
                    dc.quantity_required, dc.set_code, dc.collector_number, dc.is_proxy
             FROM deck_cards dc
             JOIN decks d ON d.id = dc.deck_id
-            WHERE {" AND ".join(clauses)}
             ORDER BY d.name ASC, dc.id ASC
         """
 
         with get_db(self.db_path) as conn:
-            rows = conn.execute(sql, params).fetchall()
+            rows = conn.execute(sql).fetchall()
 
-        return [
-            {
-                "deck_id": row["deck_id"],
-                "deck_name": row["deck_name"],
-                "format": row["format"],
-                "quantity_required": int(row["quantity_required"]),
-                "set_code": row["set_code"],
-                "collector_number": row["collector_number"],
-                "is_proxy": bool(row["is_proxy"]),
-            }
-            for row in rows
-        ]
+        usages: list[dict] = []
+        for row in rows:
+            row_oid = (row["oracle_id"] or "").strip()
+            row_name = (row["card_name"] or "").strip()
+            if oid and cname:
+                matched = cards_match(oid, cname, row_oid, row_name)
+            elif oid:
+                matched = bool(row_oid and row_oid == oid)
+            else:
+                matched = names_match(cname, row_name)
+
+            if matched:
+                usages.append(
+                    {
+                        "deck_id": row["deck_id"],
+                        "deck_name": row["deck_name"],
+                        "format": row["format"],
+                        "quantity_required": int(row["quantity_required"]),
+                        "set_code": row["set_code"],
+                        "collector_number": row["collector_number"],
+                        "is_proxy": bool(row["is_proxy"]),
+                    }
+                )
+        return usages
 
     def get_inventory_cards_with_usage(
         self,
         query: str = "",
         filter_proxy: bool | None = None,
+        filter_foil: bool | None = None,
         filter_usage: str = "all",
         filter_set: str = "",
         filter_rarity: str = "",
         include_proxies: bool = True,
+        sort_by: str | None = None,
+        sort_descending: bool = False,
     ) -> list[tuple[InventoryCard, int, int]]:
-        """Fetch inventory cards along with dynamic in-deck usage and available quantity."""
+        """Fetch inventory cards along with dynamic in-deck usage, filtering, and natural sorting."""
         all_cards = self.get_inventory_cards()
 
         with get_db(self.db_path) as conn:
@@ -876,31 +929,18 @@ class InventoryService:
                 """
             ).fetchall()
 
-        all_deck_cards = [
-            DeckCardEntry(
-                id=dc["id"],
-                deck_id=dc["deck_id"],
-                oracle_id=dc["oracle_id"],
-                name=dc["name"],
-                set_code=dc["set_code"],
-                collector_number=dc["collector_number"],
-                quantity_required=dc["quantity_required"],
-                is_proxy=bool(dc["is_proxy"]),
-                physical_quantity=int(dc["physical_quantity"] or 0),
-                proxy_quantity=int(dc["proxy_quantity"] or 0),
-                fulfilled_card_id=dc["fulfilled_card_id"],
-            )
-            for dc in deck_card_rows
-        ]
+        all_deck_cards = [_row_to_deck_card_entry(dc) for dc in deck_card_rows]
 
-        usage_by_card_id, avail_by_card_id = self.allocation_engine.calculate_inventory_usage(
+        usage_by_card_id, _ = self.allocation_engine.calculate_inventory_usage(
             all_cards, all_deck_cards, include_proxies=include_proxies
         )
 
         results: list[tuple[InventoryCard, int, int]] = []
         clean_query = query.strip().lower()
-        clean_set = filter_set.strip().lower()
-        clean_rarity = filter_rarity.strip().lower()
+        norm_query = normalize_card_name(query)
+        clean_usage = normalize_usage_filter(filter_usage)
+        clean_set = normalize_set_filter(filter_set)
+        clean_rarity = normalize_rarity_filter(filter_rarity)
 
         for card in all_cards:
             card_id = card.id
@@ -910,9 +950,13 @@ class InventoryService:
             if filter_proxy is not None and card.is_proxy != filter_proxy:
                 continue
 
+            if filter_foil is not None and card.is_foil != filter_foil:
+                continue
+
             if clean_query:
                 q_matches = (
                     clean_query in card.name.lower()
+                    or (norm_query and norm_query in normalize_card_name(card.name))
                     or clean_query in card.set_code.lower()
                     or clean_query in card.oracle_id.lower()
                     or clean_query in card.collector_number.lower()
@@ -924,16 +968,22 @@ class InventoryService:
                 continue
 
             if clean_rarity:
-                card_rarity = str(card.metadata.get("rarity", "")).strip().lower()
+                card_rarity = normalize_rarity_filter(str(card.metadata.get("rarity", "")))
                 if card_rarity != clean_rarity:
                     continue
 
-            if filter_usage == "available" and available_qty <= 0:
+            if clean_usage == "available" and available_qty <= 0:
                 continue
-            if filter_usage == "in_decks" and in_decks_qty <= 0:
+            if clean_usage == "in_decks" and in_decks_qty <= 0:
                 continue
 
             results.append((card, in_decks_qty, available_qty))
+
+        if sort_by:
+            results.sort(
+                key=lambda item: card_usage_sort_key(item, sort_by),
+                reverse=sort_descending,
+            )
 
         return results
 
@@ -948,74 +998,11 @@ class InventoryService:
         if not deck_cards:
             return [], 0, 0, 0
 
-        with get_db(self.db_path) as conn:
-            where_sql = (
-                "WHERE quantity > 0" if include_proxies else "WHERE is_proxy = 0 AND quantity > 0"
-            )
-            rows = conn.execute(
-                f"""
-                SELECT id, oracle_id, name, set_code, collector_number, quantity,
-                       is_foil, is_proxy, condition, language, metadata_json
-                FROM inventory_cards
-                {where_sql}
-                """
-            ).fetchall()
-            inventory_cards = [
-                InventoryCard(
-                    id=row["id"],
-                    oracle_id=row["oracle_id"],
-                    name=row["name"],
-                    set_code=row["set_code"],
-                    collector_number=row["collector_number"],
-                    quantity=row["quantity"],
-                    is_foil=bool(row["is_foil"]),
-                    is_proxy=bool(row["is_proxy"]),
-                    condition=row["condition"],
-                    language=row["language"],
-                    metadata_json=row["metadata_json"],
-                )
-                for row in rows
-            ]
-
-            # Deduct cards allocated to other registered decks
-            deck_filter_clauses: list[str] = []
-            deck_params: list[object] = []
-            if not include_proxies:
-                deck_filter_clauses.append("is_proxy = 0")
-            if current_deck_id is not None:
-                deck_filter_clauses.append("deck_id != ?")
-                deck_params.append(current_deck_id)
-
-            deck_filter_sql = (
-                f"WHERE {' AND '.join(deck_filter_clauses)}" if deck_filter_clauses else ""
-            )
-
-            assigned_rows = conn.execute(
-                f"""
-                SELECT id, deck_id, oracle_id, name, set_code, collector_number,
-                       quantity_required, is_proxy, physical_quantity, proxy_quantity, fulfilled_card_id
-                FROM deck_cards
-                {deck_filter_sql}
-                ORDER BY id ASC
-                """,
-                deck_params,
-            ).fetchall()
-            other_deck_cards = [
-                DeckCardEntry(
-                    id=r["id"],
-                    deck_id=r["deck_id"],
-                    oracle_id=r["oracle_id"],
-                    name=r["name"],
-                    set_code=r["set_code"],
-                    collector_number=r["collector_number"],
-                    quantity_required=r["quantity_required"],
-                    is_proxy=bool(r["is_proxy"]),
-                    physical_quantity=int(r["physical_quantity"] or 0),
-                    proxy_quantity=int(r["proxy_quantity"] or 0),
-                    fulfilled_card_id=r["fulfilled_card_id"],
-                )
-                for r in assigned_rows
-            ]
+        inventory_cards, other_deck_cards = self._load_allocation_context(
+            include_proxies=include_proxies,
+            current_deck_id=current_deck_id,
+            allocate_mode=allocate_mode,
+        )
 
         return self.allocation_engine.analyze_deck_card_matches(
             deck_cards=deck_cards,

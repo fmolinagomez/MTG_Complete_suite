@@ -1,10 +1,11 @@
 """Dedicated pure, database-independent Stock Allocation & Proxy Optimization Engine.
 
 Provides algorithms for:
+- Single card identity and print matching (exact, oracle_id, DFC, apostrophes, collector numbers).
 - Evaluating physical card stock vs deck requirements.
 - Distinguishing exact print matches vs alternative (oracle_id / name) matches.
 - Calculating missing proxy plans under exclusive (Option C shared-binder) or shared policies.
-- Tracking in-deck usage and remaining availability across registered decks.
+- Tracking in-deck usage, remaining availability, and natural collection sorting/filtering.
 """
 
 from __future__ import annotations
@@ -18,6 +19,34 @@ from src.inventory.models import (
     InventoryCard,
     MissingProxyPlan,
 )
+
+RARITY_FILTER_ALIASES: dict[str, str] = {
+    "todas": "",
+    "all": "",
+    "mítica": "mythic",
+    "mitica": "mythic",
+    "mythic": "mythic",
+    "rara": "rare",
+    "rare": "rare",
+    "infrecuente": "uncommon",
+    "uncommon": "uncommon",
+    "común": "common",
+    "comun": "common",
+    "common": "common",
+}
+
+USAGE_FILTER_ALIASES: dict[str, str] = {
+    "todas": "all",
+    "all": "all",
+    "available": "available",
+    "solo disponibles (libres)": "available",
+    "solo disponibles": "available",
+    "in_decks": "in_decks",
+    "solo asignadas a mazos": "in_decks",
+    "solo asignadas": "in_decks",
+}
+
+SET_FILTER_WILDCARDS: frozenset[str] = frozenset({"", "todas", "todas las ediciones", "all"})
 
 
 class AllocationPolicy(str, Enum):
@@ -71,11 +100,205 @@ def numbers_match(num1: str, num2: str) -> bool:
     return c1_clean == c2_clean
 
 
+def cards_match(oracle_id_1: str, name_1: str, oracle_id_2: str, name_2: str) -> bool:
+    """Match two card identities by canonical oracle_id or DFC-tolerant normalized name."""
+    oid1 = (oracle_id_1 or "").strip()
+    oid2 = (oracle_id_2 or "").strip()
+    if oid1 and oid2 and oid1 == oid2:
+        return True
+    return names_match(name_1, name_2)
+
+
+def prints_match(
+    set_code_1: str,
+    collector_number_1: str,
+    set_code_2: str,
+    collector_number_2: str,
+) -> bool:
+    """Match two card printings by set code and normalized collector number."""
+    sc1 = (set_code_1 or "").strip().lower()
+    sc2 = (set_code_2 or "").strip().lower()
+    return sc1 == sc2 and numbers_match(collector_number_1, collector_number_2)
+
+
+def normalize_rarity_filter(value: str) -> str:
+    """Normalize a rarity filter string (Spanish or English) to canonical lowercase rarity."""
+    clean = (value or "").strip().lower()
+    return RARITY_FILTER_ALIASES.get(clean, clean)
+
+
+def normalize_usage_filter(value: str) -> str:
+    """Normalize a usage filter string to 'all', 'available', or 'in_decks'."""
+    clean = (value or "").strip().lower()
+    return USAGE_FILTER_ALIASES.get(clean, "all")
+
+
+def normalize_set_filter(value: str) -> str:
+    """Normalize a set code filter string, returning empty string for 'all sets' wildcards."""
+    clean = (value or "").strip().lower()
+    return "" if clean in SET_FILTER_WILDCARDS else clean
+
+
+def card_usage_sort_key(item: tuple[InventoryCard, int, int], col: str) -> object:
+    """Return a natural sort key for an (InventoryCard, in_decks_qty, available_qty) tuple."""
+    card, in_decks_qty, available_qty = item
+    if col == "name":
+        return (card.name or "").lower()
+    if col == "set_code":
+        return (card.set_code or "").lower()
+    if col == "collector_number":
+        try:
+            return (0, int(card.collector_number))
+        except (ValueError, TypeError):
+            return (1, (card.collector_number or "").lower())
+    if col == "quantity":
+        return card.quantity
+    if col == "available":
+        return available_qty
+    if col == "in_decks":
+        return in_decks_qty
+    if col == "foil":
+        return 1 if card.is_foil else 0
+    if col == "proxy":
+        return 1 if card.is_proxy else 0
+    if col == "condition":
+        return (card.condition or "").lower()
+    if col == "language":
+        return (card.language or "").lower()
+    return ""
+
+
 class StockAllocationEngine:
     """Pure, database-independent engine for card matching and multi-deck stock allocation."""
 
     def __init__(self, default_policy: AllocationPolicy | str = AllocationPolicy.EXCLUSIVE) -> None:
         self.default_policy = AllocationPolicy.from_str(default_policy)
+
+    @staticmethod
+    def _build_stock_pool(
+        inventory_cards: Sequence[InventoryCard],
+        include_proxies: bool,
+    ) -> list[dict]:
+        """Build a mutable stock pool prioritizing physical cards before proxies."""
+        pool = [
+            {
+                "id": card.id,
+                "oracle_id": (card.oracle_id or "").strip(),
+                "name": (card.name or "").strip(),
+                "set_code": (card.set_code or "").strip().lower(),
+                "collector_number": (card.collector_number or "").strip().lower(),
+                "quantity": int(card.quantity),
+                "initial_quantity": int(card.quantity),
+                "is_foil": bool(card.is_foil),
+                "condition": str(card.condition or "NM"),
+                "is_proxy": bool(card.is_proxy),
+            }
+            for card in inventory_cards
+            if card.quantity > 0 and (include_proxies or not card.is_proxy)
+        ]
+        pool.sort(key=lambda item: 1 if item["is_proxy"] else 0)
+        return pool
+
+    @staticmethod
+    def _deduct_from_pool(
+        stock_pool: list[dict],
+        qty_to_deduct: int,
+        oracle_id: str,
+        name: str,
+        set_code: str,
+        collector_number: str,
+        fulfilled_card_id: int | None = None,
+    ) -> int:
+        """Deduct up to qty_to_deduct copies from stock_pool in 3 priority passes.
+
+        Order:
+        1. Specific fulfilled_card_id match (if set).
+        2. Exact print match (physical before proxy).
+        3. Alternative print match (physical before proxy).
+        """
+        remaining = int(qty_to_deduct)
+        if remaining <= 0:
+            return 0
+
+        # Pass 1: Specific card ID fulfillment
+        if fulfilled_card_id is not None:
+            for item in stock_pool:
+                if item["id"] == fulfilled_card_id and item["quantity"] > 0:
+                    take = min(remaining, item["quantity"])
+                    item["quantity"] -= take
+                    remaining -= take
+                    break
+
+        # Pass 2: Exact print match
+        if remaining > 0:
+            for item in stock_pool:
+                if remaining <= 0:
+                    break
+                if (
+                    item["quantity"] > 0
+                    and cards_match(oracle_id, name, item["oracle_id"], item["name"])
+                    and prints_match(
+                        set_code, collector_number, item["set_code"], item["collector_number"]
+                    )
+                ):
+                    take = min(remaining, item["quantity"])
+                    item["quantity"] -= take
+                    remaining -= take
+
+        # Pass 3: Alternative print match
+        if remaining > 0:
+            for item in stock_pool:
+                if remaining <= 0:
+                    break
+                if item["quantity"] > 0 and cards_match(
+                    oracle_id, name, item["oracle_id"], item["name"]
+                ):
+                    take = min(remaining, item["quantity"])
+                    item["quantity"] -= take
+                    remaining -= take
+
+        return int(qty_to_deduct) - remaining
+
+    @classmethod
+    def _deduct_other_decks(
+        cls,
+        stock_pool: list[dict],
+        other_deck_cards: Sequence[DeckCardEntry] | None,
+        policy: AllocationPolicy,
+        current_deck_id: int | None,
+    ) -> None:
+        """Deduct copies reserved by other registered decks under EXCLUSIVE policy."""
+        if (
+            policy not in (AllocationPolicy.EXCLUSIVE, AllocationPolicy.OPTION_C_SHARED)
+            or not other_deck_cards
+        ):
+            return
+
+        for assigned in other_deck_cards:
+            if current_deck_id is not None and assigned.deck_id == current_deck_id:
+                continue
+            if assigned.proxy_quantity > 0 and assigned.physical_quantity == 0:
+                continue
+            if assigned.is_proxy and assigned.physical_quantity == 0:
+                continue
+
+            qty_to_deduct = int(
+                assigned.physical_quantity
+                if assigned.physical_quantity > 0
+                else assigned.quantity_required
+            )
+            if qty_to_deduct <= 0:
+                continue
+
+            cls._deduct_from_pool(
+                stock_pool,
+                qty_to_deduct,
+                assigned.oracle_id,
+                assigned.name,
+                assigned.set_code,
+                assigned.collector_number,
+                assigned.fulfilled_card_id,
+            )
 
     def calculate_missing_proxies(
         self,
@@ -89,122 +312,28 @@ class StockAllocationEngine:
     ) -> MissingProxyPlan:
         """Evaluate physical and proxy card availability vs deck requirements.
 
-        Under EXCLUSIVE / OPTION_C_SHARED policy, cards assigned to other registered decks
-        are subtracted from available inventory stock.
+        Uses the unified per-card allocation pass so fulfilled_card_id, granular
+        physical/proxy splits, and exact-before-alternative deductions never diverge.
         """
         plan = MissingProxyPlan(deck_name=deck_name)
         if not deck_cards:
             return plan
 
-        policy = (
-            AllocationPolicy.from_str(allocate_mode)
-            if allocate_mode is not None
-            else self.default_policy
+        details_list, _, _, _ = self.analyze_deck_card_matches(
+            deck_cards=deck_cards,
+            inventory_cards=inventory_cards,
+            other_deck_cards=other_deck_cards,
+            allocate_mode=allocate_mode,
+            current_deck_id=current_deck_id,
+            include_proxies=include_proxies,
         )
 
-        # Aggregate collection totals by oracle_id and normalized name
-        stock_by_oracle: dict[str, int] = {}
-        stock_by_name: dict[str, int] = {}
-
-        for card in inventory_cards:
-            if card.quantity <= 0:
-                continue
-            if not include_proxies and card.is_proxy:
-                continue
-            qty = card.quantity
-            oid = (card.oracle_id or "").strip()
-            cname = normalize_card_name(card.name)
-            if oid:
-                stock_by_oracle[oid] = stock_by_oracle.get(oid, 0) + qty
-            if cname:
-                stock_by_name[cname] = stock_by_name.get(cname, 0) + qty
-                cname_front = cname.split(" // ")[0].strip()
-                if cname_front != cname:
-                    stock_by_name[cname_front] = stock_by_name.get(cname_front, 0) + qty
-
-        # Subtract cards already assigned to other registered decks if exclusive
-        if (
-            policy in (AllocationPolicy.EXCLUSIVE, AllocationPolicy.OPTION_C_SHARED)
-            and other_deck_cards
-        ):
-            for assigned in other_deck_cards:
-                if current_deck_id is not None and assigned.deck_id == current_deck_id:
-                    continue
-                if assigned.proxy_quantity > 0 and assigned.physical_quantity == 0:
-                    continue
-                if assigned.is_proxy and assigned.physical_quantity == 0:
-                    continue
-
-                assigned_qty = (
-                    assigned.physical_quantity
-                    if assigned.physical_quantity > 0
-                    else assigned.quantity_required
-                )
-                if assigned_qty <= 0:
-                    continue
-
-                oid = (assigned.oracle_id or "").strip()
-                cname = normalize_card_name(assigned.name)
-                cname_front = cname.split(" // ")[0].strip()
-                if oid in stock_by_oracle:
-                    stock_by_oracle[oid] = max(0, stock_by_oracle[oid] - assigned_qty)
-                if cname in stock_by_name:
-                    stock_by_name[cname] = max(0, stock_by_name[cname] - assigned_qty)
-                if cname_front != cname and cname_front in stock_by_name:
-                    stock_by_name[cname_front] = max(0, stock_by_name[cname_front] - assigned_qty)
-
-        # Allocate stock for requested deck cards
         owned_list: list[DeckCardEntry] = []
         missing_list: list[DeckCardEntry] = []
 
-        for entry in deck_cards:
-            needed = entry.quantity_required
-            oid = (entry.oracle_id or "").strip()
-            cname = normalize_card_name(entry.name)
-            cname_front = cname.split(" // ")[0].strip()
-
-            has_explicit = entry.proxy_quantity > 0 or entry.physical_quantity > 0
-            if has_explicit:
-                owned_qty = min(needed, entry.physical_quantity)
-                missing_qty = (
-                    entry.proxy_quantity if entry.proxy_quantity > 0 else (needed - owned_qty)
-                )
-            elif entry.is_proxy:
-                owned_qty = 0
-                missing_qty = needed
-            else:
-                available = 0
-                match_key = ""
-                is_oracle_match = False
-
-                if oid and oid in stock_by_oracle:
-                    available = stock_by_oracle[oid]
-                    match_key = oid
-                    is_oracle_match = True
-                elif cname and cname in stock_by_name:
-                    available = stock_by_name[cname]
-                    match_key = cname
-                    is_oracle_match = False
-                elif cname_front and cname_front in stock_by_name:
-                    available = stock_by_name[cname_front]
-                    match_key = cname_front
-                    is_oracle_match = False
-
-                owned_qty = min(needed, available)
-                missing_qty = needed - owned_qty
-
-                if is_oracle_match and match_key:
-                    stock_by_oracle[match_key] -= owned_qty
-                    if cname in stock_by_name:
-                        stock_by_name[cname] = max(0, stock_by_name[cname] - owned_qty)
-                    if cname_front != cname and cname_front in stock_by_name:
-                        stock_by_name[cname_front] = max(0, stock_by_name[cname_front] - owned_qty)
-                elif match_key:
-                    stock_by_name[match_key] -= owned_qty
-                    if match_key != cname and cname in stock_by_name:
-                        stock_by_name[cname] = max(0, stock_by_name[cname] - owned_qty)
-                    if match_key != cname_front and cname_front in stock_by_name:
-                        stock_by_name[cname_front] = max(0, stock_by_name[cname_front] - owned_qty)
+        for entry, detail in zip(deck_cards, details_list, strict=True):
+            owned_qty = detail.physical_quantity
+            missing_qty = detail.proxy_quantity
 
             if owned_qty > 0:
                 owned_list.append(
@@ -270,94 +399,8 @@ class StockAllocationEngine:
             else self.default_policy
         )
 
-        stock_pool = [
-            {
-                "id": card.id,
-                "oracle_id": (card.oracle_id or "").strip(),
-                "name": (card.name or "").strip(),
-                "set_code": (card.set_code or "").strip().lower(),
-                "collector_number": (card.collector_number or "").strip().lower(),
-                "quantity": int(card.quantity),
-                "is_foil": bool(card.is_foil),
-                "condition": str(card.condition or "NM"),
-                "is_proxy": bool(card.is_proxy),
-            }
-            for card in inventory_cards
-            if card.quantity > 0 and (include_proxies or not card.is_proxy)
-        ]
-        # Prioritize physical cards (is_proxy=False) before proxies (is_proxy=True)
-        stock_pool.sort(key=lambda item: 1 if item["is_proxy"] else 0)
-
-        def _card_matches(entry_oid: str, entry_name: str, item: dict) -> bool:
-            if entry_oid and item["oracle_id"] and entry_oid == item["oracle_id"]:
-                return True
-            return names_match(entry_name, item["name"])
-
-        def _print_matches(entry_sc: str, entry_num: str, item: dict) -> bool:
-            return item["set_code"] == entry_sc and numbers_match(
-                item["collector_number"], entry_num
-            )
-
-        # Deduct cards allocated to other registered decks
-        if (
-            policy in (AllocationPolicy.EXCLUSIVE, AllocationPolicy.OPTION_C_SHARED)
-            and other_deck_cards
-        ):
-            for assigned in other_deck_cards:
-                if current_deck_id is not None and assigned.deck_id == current_deck_id:
-                    continue
-                if assigned.proxy_quantity > 0 and assigned.physical_quantity == 0:
-                    continue
-                if assigned.is_proxy and assigned.physical_quantity == 0:
-                    continue
-
-                qty_to_deduct = int(
-                    assigned.physical_quantity
-                    if assigned.physical_quantity > 0
-                    else assigned.quantity_required
-                )
-                if qty_to_deduct <= 0:
-                    continue
-
-                assigned_sc = (assigned.set_code or "").strip().lower()
-                assigned_num = (assigned.collector_number or "").strip().lower()
-                assigned_oid = (assigned.oracle_id or "").strip()
-                assigned_name = (assigned.name or "").strip()
-
-                # Specific card ID fulfillment deduction first
-                if assigned.fulfilled_card_id is not None:
-                    for item in stock_pool:
-                        if item["id"] == assigned.fulfilled_card_id and item["quantity"] > 0:
-                            take = min(qty_to_deduct, item["quantity"])
-                            item["quantity"] -= take
-                            qty_to_deduct -= take
-                            break
-
-                # Exact match deduction next
-                if qty_to_deduct > 0:
-                    for item in stock_pool:
-                        if qty_to_deduct <= 0:
-                            break
-                        if (
-                            item["quantity"] > 0
-                            and _card_matches(assigned_oid, assigned_name, item)
-                            and _print_matches(assigned_sc, assigned_num, item)
-                        ):
-                            take = min(qty_to_deduct, item["quantity"])
-                            item["quantity"] -= take
-                            qty_to_deduct -= take
-
-                # Alternative match deduction next
-                if qty_to_deduct > 0:
-                    for item in stock_pool:
-                        if qty_to_deduct <= 0:
-                            break
-                        if item["quantity"] > 0 and _card_matches(
-                            assigned_oid, assigned_name, item
-                        ):
-                            take = min(qty_to_deduct, item["quantity"])
-                            item["quantity"] -= take
-                            qty_to_deduct -= take
+        stock_pool = self._build_stock_pool(inventory_cards, include_proxies=include_proxies)
+        self._deduct_other_decks(stock_pool, other_deck_cards, policy, current_deck_id)
 
         details_list: list[DeckCardMatchDetail] = []
         total_exact = 0
@@ -378,17 +421,16 @@ class StockAllocationEngine:
             for item in stock_pool:
                 if item["quantity"] <= 0:
                     continue
-                if not _card_matches(entry_oid, entry_name, item):
+                if not cards_match(entry_oid, entry_name, item["oracle_id"], item["name"]):
                     continue
-                is_exact = _print_matches(entry_sc, entry_num, item)
+                is_exact = prints_match(
+                    entry_sc, entry_num, item["set_code"], item["collector_number"]
+                )
                 if is_exact:
                     exact_stock += item["quantity"]
                 else:
                     alt_stock += item["quantity"]
 
-                foil_str = " (Foil)" if item.get("is_foil") else ""
-                proxy_str = " [Proxy]" if item.get("is_proxy") else ""
-                label = f"{item['set_code'].upper()} #{item['collector_number']} - {item['quantity']} disp.{foil_str}{proxy_str}"
                 available_versions.append(
                     {
                         "card_id": item["id"],
@@ -399,7 +441,6 @@ class StockAllocationEngine:
                         "is_proxy": item.get("is_proxy", False),
                         "quantity_available": item["quantity"],
                         "is_exact": is_exact,
-                        "label": label,
                     }
                 )
 
@@ -415,57 +456,28 @@ class StockAllocationEngine:
             elif entry.is_proxy:
                 allocated_physical = 0
                 allocated_proxy = needed
+            elif entry.fulfilled_card_id is not None:
+                target_item = next(
+                    (it for it in stock_pool if it["id"] == entry.fulfilled_card_id), None
+                )
+                avail_target = target_item["quantity"] if target_item else 0
+                allocated_physical = min(needed, avail_target)
+                allocated_proxy = needed - allocated_physical
             else:
-                if entry.fulfilled_card_id is not None:
-                    # Allocate from specific card if available
-                    target_item = next(
-                        (it for it in stock_pool if it["id"] == entry.fulfilled_card_id), None
-                    )
-                    avail_target = target_item["quantity"] if target_item else 0
-                    allocated_physical = min(needed, avail_target)
-                    allocated_proxy = needed - allocated_physical
-                else:
-                    # Auto allocation
-                    allocated_physical = min(needed, exact_stock + alt_stock)
-                    allocated_proxy = needed - allocated_physical
+                allocated_physical = min(needed, exact_stock + alt_stock)
+                allocated_proxy = needed - allocated_physical
 
             # Deduct allocated physical copies from stock pool
-            deduct_rem = allocated_physical
-            if deduct_rem > 0 and entry.fulfilled_card_id is not None:
-                for item in stock_pool:
-                    if item["id"] == entry.fulfilled_card_id and item["quantity"] > 0:
-                        take = min(deduct_rem, item["quantity"])
-                        item["quantity"] -= take
-                        deduct_rem -= take
-                        break
-
-            # Deduct exact matches first
-            if deduct_rem > 0:
-                for item in stock_pool:
-                    if deduct_rem <= 0:
-                        break
-                    if (
-                        item["quantity"] > 0
-                        and _card_matches(entry_oid, entry_name, item)
-                        and _print_matches(entry_sc, entry_num, item)
-                    ):
-                        take = min(deduct_rem, item["quantity"])
-                        item["quantity"] -= take
-                        deduct_rem -= take
-
-            # Deduct alternative matches next
-            if deduct_rem > 0:
-                for item in stock_pool:
-                    if deduct_rem <= 0:
-                        break
-                    if (
-                        item["quantity"] > 0
-                        and _card_matches(entry_oid, entry_name, item)
-                        and not _print_matches(entry_sc, entry_num, item)
-                    ):
-                        take = min(deduct_rem, item["quantity"])
-                        item["quantity"] -= take
-                        deduct_rem -= take
+            if allocated_physical > 0:
+                self._deduct_from_pool(
+                    stock_pool,
+                    allocated_physical,
+                    entry_oid,
+                    entry_name,
+                    entry_sc,
+                    entry_num,
+                    entry.fulfilled_card_id,
+                )
 
             # Calculate status
             if allocated_physical >= needed:
@@ -542,6 +554,8 @@ class StockAllocationEngine:
             card.id: card.quantity for card in inventory_cards if card.id is not None
         }
 
+        stock_pool = self._build_stock_pool(inventory_cards, include_proxies=include_proxies)
+
         for dc in deck_cards:
             if dc.proxy_quantity > 0 and dc.physical_quantity == 0:
                 continue
@@ -552,67 +566,20 @@ class StockAllocationEngine:
             if dc_qty <= 0:
                 continue
 
-            # If a specific inventory card was chosen to fulfill this requirement
-            if dc.fulfilled_card_id is not None and dc.fulfilled_card_id in avail_by_card_id:
-                avail = avail_by_card_id[dc.fulfilled_card_id]
-                if avail > 0:
-                    take = min(dc_qty, avail)
-                    avail_by_card_id[dc.fulfilled_card_id] -= take
-                    usage_by_card_id[dc.fulfilled_card_id] += take
-                    dc_qty -= take
+            self._deduct_from_pool(
+                stock_pool,
+                dc_qty,
+                dc.oracle_id,
+                dc.name,
+                dc.set_code,
+                dc.collector_number,
+                dc.fulfilled_card_id,
+            )
 
-            if dc_qty <= 0:
-                continue
-
-            dc_sc = (dc.set_code or "").strip().lower()
-            dc_num = (dc.collector_number or "").strip().lower()
-            dc_oid = (dc.oracle_id or "").strip()
-            dc_name = (dc.name or "").strip()
-
-            def _card_matches_dc(card: InventoryCard) -> bool:
-                if dc_oid and card.oracle_id and dc_oid == card.oracle_id.strip():
-                    return True
-                return names_match(dc_name, card.name)
-
-            def _print_matches_dc(card: InventoryCard) -> bool:
-                return (card.set_code or "").strip().lower() == dc_sc and numbers_match(
-                    card.collector_number, dc_num
-                )
-
-            # Pass 1: exact print match (prefer physical cards, then proxies)
-            targets = [False, True] if include_proxies else [False]
-            for target_proxy in targets:
-                if dc_qty <= 0:
-                    break
-                for card in inventory_cards:
-                    if dc_qty <= 0:
-                        break
-                    if card.id is None or card.is_proxy != target_proxy:
-                        continue
-                    if _card_matches_dc(card) and _print_matches_dc(card):
-                        avail = avail_by_card_id[card.id]
-                        if avail > 0:
-                            take = min(dc_qty, avail)
-                            avail_by_card_id[card.id] -= take
-                            usage_by_card_id[card.id] += take
-                            dc_qty -= take
-
-            # Pass 2: alternative print match (prefer physical cards, then proxies)
-            if dc_qty > 0:
-                for target_proxy in targets:
-                    if dc_qty <= 0:
-                        break
-                    for card in inventory_cards:
-                        if dc_qty <= 0:
-                            break
-                        if card.id is None or card.is_proxy != target_proxy:
-                            continue
-                        if _card_matches_dc(card):
-                            avail = avail_by_card_id[card.id]
-                            if avail > 0:
-                                take = min(dc_qty, avail)
-                                avail_by_card_id[card.id] -= take
-                                usage_by_card_id[card.id] += take
-                                dc_qty -= take
+        for item in stock_pool:
+            cid = item["id"]
+            if cid is not None:
+                avail_by_card_id[cid] = item["quantity"]
+                usage_by_card_id[cid] = item["initial_quantity"] - item["quantity"]
 
         return usage_by_card_id, avail_by_card_id

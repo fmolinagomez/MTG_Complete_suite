@@ -1,4 +1,4 @@
-"""ManaBox CSV parser and import handling."""
+"""ManaBox CSV parser and import adapter."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-from src.inventory.db import get_db
 from src.inventory.models import InventoryCard
 
 FOIL_VALUES = frozenset({"foil", "etched", "foil_etched", "true", "1", "yes"})
@@ -19,29 +18,24 @@ def _normalize_header(header: str) -> str:
     return header.strip("\ufeff \t\r\n").lower().replace("_", " ").replace("-", " ")
 
 
+def _read_text_with_fallback(path: Path) -> str:
+    """Read text from a file path trying UTF-8/BOM, CP1252, and Latin-1 encodings."""
+    for enc in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+        try:
+            return path.read_text(encoding=enc)
+        except UnicodeDecodeError:
+            continue
+    return path.read_text(encoding="latin-1", errors="replace")
+
+
 def parse_manabox_csv(source: Path | str | io.TextIOBase) -> list[InventoryCard]:
     """Parse a ManaBox CSV export into a list of InventoryCard objects."""
     content: str
     if isinstance(source, Path):
-        for enc in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
-            try:
-                content = source.read_text(encoding=enc)
-                break
-            except UnicodeDecodeError:
-                continue
-        else:
-            content = source.read_text(encoding="latin-1", errors="replace")
+        content = _read_text_with_fallback(source)
     elif isinstance(source, str):
         if source.strip() and not ("\n" in source or "," in source) and Path(source).is_file():
-            path = Path(source)
-            for enc in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
-                try:
-                    content = path.read_text(encoding=enc)
-                    break
-                except UnicodeDecodeError:
-                    continue
-            else:
-                content = path.read_text(encoding="latin-1", errors="replace")
+            content = _read_text_with_fallback(Path(source))
         else:
             content = source
     else:
@@ -155,99 +149,7 @@ def import_parsed_cards(
     db_path: Path | str | None = None,
     mode: str = "merge",
 ) -> int:
-    """Import parsed cards into the inventory database using replace or merge mode."""
-    mode_clean = mode.strip().lower()
-    if mode_clean not in ("replace", "merge"):
-        raise ValueError("Modo de importación no válido: debe ser 'merge' o 'replace'")
+    """Import parsed cards into the inventory database using InventoryService."""
+    from src.inventory.service import InventoryService
 
-    if not cards:
-        if mode_clean == "replace":
-            with get_db(db_path) as conn:
-                conn.execute("DELETE FROM inventory_cards WHERE is_proxy = 0")
-        return 0
-
-    with get_db(db_path) as conn:
-        if mode_clean == "replace":
-            conn.execute("DELETE FROM inventory_cards WHERE is_proxy = 0")
-            for card in cards:
-                conn.execute(
-                    """
-                    INSERT INTO inventory_cards (
-                        oracle_id, name, set_code, collector_number, quantity,
-                        is_foil, is_proxy, condition, language, metadata_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        card.oracle_id,
-                        card.name,
-                        card.set_code,
-                        card.collector_number,
-                        card.quantity,
-                        1 if card.is_foil else 0,
-                        1 if card.is_proxy else 0,
-                        card.condition,
-                        card.language,
-                        card.metadata_json,
-                    ),
-                )
-        else:
-            # Merge mode: smart upsert matching print and foil
-            for card in cards:
-                row = conn.execute(
-                    """
-                    SELECT id, quantity FROM inventory_cards
-                    WHERE set_code = ? AND collector_number = ? AND is_foil = ? AND is_proxy = ?
-                    """,
-                    (
-                        card.set_code,
-                        card.collector_number,
-                        1 if card.is_foil else 0,
-                        1 if card.is_proxy else 0,
-                    ),
-                ).fetchone()
-
-                if row:
-                    conn.execute(
-                        """
-                        UPDATE inventory_cards SET
-                            oracle_id = ?,
-                            name = ?,
-                            quantity = ?,
-                            condition = ?,
-                            language = ?,
-                            metadata_json = ?
-                        WHERE id = ?
-                        """,
-                        (
-                            card.oracle_id,
-                            card.name,
-                            card.quantity,
-                            card.condition,
-                            card.language,
-                            card.metadata_json,
-                            row["id"],
-                        ),
-                    )
-                else:
-                    conn.execute(
-                        """
-                        INSERT INTO inventory_cards (
-                            oracle_id, name, set_code, collector_number, quantity,
-                            is_foil, is_proxy, condition, language, metadata_json
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            card.oracle_id,
-                            card.name,
-                            card.set_code,
-                            card.collector_number,
-                            card.quantity,
-                            1 if card.is_foil else 0,
-                            1 if card.is_proxy else 0,
-                            card.condition,
-                            card.language,
-                            card.metadata_json,
-                        ),
-                    )
-
-    return sum(c.quantity for c in cards)
+    return InventoryService(db_path=db_path).import_cards(cards, mode=mode)

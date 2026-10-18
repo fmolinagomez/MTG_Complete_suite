@@ -273,6 +273,110 @@ class TestDeckCardVersioningAndAllocation:
         assert in_decks == 0
         assert avail == 1
 
+    def test_calculate_missing_proxies_honors_fulfilled_card_id(
+        self, service: InventoryService
+    ) -> None:
+        # 1 copy of DMR Counterspell, 3 copies of ICE Counterspell
+        id_dmr = service.add_or_update_card(
+            InventoryCard(
+                oracle_id="oid-counterspell",
+                name="Counterspell",
+                set_code="dmr",
+                collector_number="45",
+                quantity=1,
+            )
+        )
+        service.add_or_update_card(
+            InventoryCard(
+                oracle_id="oid-counterspell",
+                name="Counterspell",
+                set_code="ice",
+                collector_number="82",
+                quantity=3,
+            )
+        )
+
+        # Deck requires 2 Counterspells pinned specifically to DMR (which only has 1 copy)
+        deck_id = service.register_deck(
+            DeckRecord(name="Pinned Print Deck"),
+            [
+                DeckCardEntry(
+                    deck_id=0,
+                    oracle_id="oid-counterspell",
+                    name="Counterspell",
+                    set_code="mh2",
+                    collector_number="267",
+                    quantity_required=2,
+                    fulfilled_card_id=id_dmr,
+                )
+            ],
+        )
+
+        _, deck_cards = service.get_deck_by_id(deck_id)
+        plan = service.calculate_missing_proxies(deck_cards, current_deck_id=deck_id)
+
+        # Because fulfilled_card_id is pinned to id_dmr (stock=1), 1 copy is owned and 1 is missing
+        assert plan.total_required == 2
+        assert plan.total_owned == 1
+        assert plan.total_missing == 1
+        assert plan.missing_cards[0].quantity_required == 1
+
+    def test_deck_card_match_detail_transition_methods(self) -> None:
+        from src.inventory.models import DeckCardMatchDetail
+
+        detail = DeckCardMatchDetail(
+            deck_card_id=1,
+            name="Lightning Bolt",
+            set_code="2x2",
+            collector_number="117",
+            quantity_required=4,
+            exact_stock=1,
+            alt_stock=2,
+            status="partial",
+            physical_quantity=3,
+            proxy_quantity=1,
+            assigned_version_id=None,
+            available_versions=[
+                {
+                    "card_id": 10,
+                    "set_code": "2X2",
+                    "collector_number": "117",
+                    "quantity_available": 1,
+                },
+                {
+                    "card_id": 20,
+                    "set_code": "M11",
+                    "collector_number": "149",
+                    "quantity_available": 2,
+                },
+            ],
+        )
+
+        # Auto ceiling is sum of all versions (1 + 2 = 3), capped at quantity_required (4) -> 3
+        assert detail.max_physical_for_version(None) == 3
+        # Pinned to card_id=10 -> max 1
+        assert detail.max_physical_for_version(10) == 1
+        # Pinned to card_id=20 -> max 2
+        assert detail.max_physical_for_version(20) == 2
+
+        # Proxy toggle when physical_quantity > 0 forces all proxies
+        assert detail.resolve_proxy_toggle() == (0, 4, None)
+
+        # Version selection:
+        # -1 -> Ninguna (Solo Proxy)
+        assert detail.resolve_version_selection(-1) == (0, 4, None)
+        # None -> Auto (3 physical, 1 proxy)
+        assert detail.resolve_version_selection(None) == (3, 1, None)
+        # 20 -> M11 (2 physical, 2 proxy, fulfilled_card_id=20)
+        assert detail.resolve_version_selection(20) == (2, 2, 20)
+
+        # Physical quantity spinbox commit:
+        # Clamped to [0, max_physical_for_version(assigned_version_id)]
+        detail.assigned_version_id = 20
+        assert detail.resolve_physical_quantity(4) == (2, 2, 20)
+        assert detail.resolve_physical_quantity(1) == (1, 3, 20)
+        assert detail.resolve_physical_quantity(-5) == (0, 4, 20)
+
 
 class TestDeckViewInteractiveCellEditing:
     """Test GUI interactions for version dropdown, spinbox, and proxy toggle."""
