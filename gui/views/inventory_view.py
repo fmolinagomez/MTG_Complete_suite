@@ -10,13 +10,12 @@ from tkinter import filedialog, messagebox, ttk
 
 from gui.components.card_preview_hover import CardHoverPreview, CardPreviewInfo
 from gui.paths import output_dir, work_dir
-from src.deck_importer import DeckCard, fetch_deck
+from src.deck_importer import DeckCard, MtgUrlDeck, fetch_deck
 from src.engine.task_manager import JobResultEvent, JobStatus, TaskManager
 from src.inventory.models import DeckCardEntry, DeckCardMatchDetail, DeckRecord, InventoryCard
 from src.inventory.service import InventoryService
-from src.pipeline import run_locals_only
-from src.scraper_utils import resources_dir, sanitize_filename
-from src.scryfall import download_deck_images
+from src.pipeline import PrintJobSpec, PrintPipeline
+from src.scraper_utils import sanitize_filename
 
 _log = logging.getLogger(__name__)
 
@@ -2319,38 +2318,20 @@ class InventoryView(ttk.Frame):
             )
             for c in missing_cards
         ]
-        out_dir = output_dir()
-        w_dir = work_dir()
-        scryfall_dir = w_dir / "scryfall"
-        dl_results = download_deck_images(
-            cards,
-            scryfall_dir,
+        mtg_deck = MtgUrlDeck(
+            url=deck.source_url or "",
+            cards=cards,
+            name=f"{deck.name}_proxies",
+            format=deck.format or "commander",
+        )
+        spec = PrintJobSpec(
+            mtg_decks=[mtg_deck],
+            output_dir=output_dir(),
+            work_dir=work_dir(),
+            base_name=sanitize_filename(f"{deck.name}_proxies"),
             cancel_event=cancel_event,
         )
-        mtg_back = resources_dir() / "backs" / "mtg" / "back.jpg"
-        extra_fronts: list[Path] = []
-        extra_backs: list[Path | None] = []
-        local_crop_map: dict[Path, bool] = {}
-
-        for card, front_path, back_path in dl_results:
-            local_crop_map[front_path] = False
-            if back_path:
-                local_crop_map[back_path] = False
-            for _ in range(card.quantity):
-                extra_fronts.append(front_path)
-                extra_backs.append(back_path)
-
-        base_name = sanitize_filename(f"{deck.name}_proxies")
-        return run_locals_only(
-            extra_fronts=extra_fronts,
-            local_cardback=mtg_back,
-            output_dir=out_dir,
-            base_name=base_name,
-            work_dir=w_dir,
-            cancel_event=cancel_event,
-            extra_backs=extra_backs,
-            local_crop_map=local_crop_map,
-        )
+        return PrintPipeline.execute(spec).pdf_paths
 
     # ---------------------------------------------------------------------------
     # Global Refresh & Event Polling Lifecycle

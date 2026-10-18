@@ -16,6 +16,7 @@ import logging
 import re
 import urllib.parse
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import requests
 
@@ -111,6 +112,68 @@ class FetchedDeck:
     raw_json: dict | None = None
     game: str = "mtg"
     source: str = ""
+
+
+@dataclass
+class MtgUrlDeck:
+    url: str
+    cards: list[DeckCard]
+    include_side: bool = False
+    include_tokens: bool = False
+    name: str = ""
+    back_path: Path | None = None
+    format: str = "commander"
+    include_separator: bool = False
+    selected_card_ids: set[int] | None = None
+
+    @property
+    def display_name(self) -> str:
+        if self.name:
+            return self.name
+        try:
+            platform = self.url.split("/")[2].replace("www.", "")
+            slug = self.url.rstrip("/").split("/")[-1]
+            return f"{platform}/{slug}"
+        except IndexError:
+            return self.url[:40]
+
+    @property
+    def active_count(self) -> int:
+        main_side_count = sum(
+            c.quantity
+            for c in self.cards
+            if (self.selected_card_ids is None or id(c) in self.selected_card_ids)
+            and (c.zone == "main" or (c.zone == "side" and self.include_side))
+        )
+        token_count = 0
+        if self.include_tokens:
+            seen_tokens = set()
+            for c in self.cards:
+                if (self.selected_card_ids is None or id(c) in self.selected_card_ids) and (
+                    c.zone == "token"
+                    and (not c.layout or c.layout in ("token", "emblem", "double_faced_token"))
+                ):
+                    key = ((c.set_code or "").lower(), c.collector_number or "")
+                    if key not in seen_tokens:
+                        seen_tokens.add(key)
+                        token_count += 1
+        base = main_side_count + token_count
+        if self.include_separator:
+            base += 1
+        return base
+
+    def includes(self, card: DeckCard) -> bool:
+        if self.selected_card_ids is not None and id(card) not in self.selected_card_ids:
+            return False
+        if card.zone == "main":
+            return True
+        if card.zone == "side":
+            return self.include_side
+        if card.zone == "token":
+            return self.include_tokens and (
+                not card.layout or card.layout in ("token", "emblem", "double_faced_token")
+            )
+        return False
 
 
 # ===========================================================================

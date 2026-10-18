@@ -19,9 +19,8 @@ GUI / CLI
 - `src/parser.py`: XML → `CardOrder`/`CardImage`, incluyendo reversos por slot.
 - `src/validator.py`: warnings de estructura, slots, frontales y reversos.
 - `src/precheck.py`: análisis, planificación y manifiesto de fusiones.
-- `src/pipeline.py`: orquestación; entradas principales `run`, `run_merged`, `run_plan`, `run_locals_only`, `run_deck_url`.
-- `src/print_batch.py`, `src/print_run.py`, `src/execution_plan.py`: lote imprimible normalizado,
-  política de PDF separado y combinación de entradas sin Tkinter.
+- `src/pipeline.py`: motor unificado `PrintPipeline.execute(PrintJobSpec)` y envoltorios compatibles (`run`, `run_merged`, `run_plan`, `run_locals_only`, `run_print_batch`, `run_deck_url`).
+- `src/print_batch.py`, `src/tcg_batches.py`: `CardSlot`, `PrintBatch`, `CombinedPrintRun`, adaptadores de lotes TCG, separadores y emisión de `tokens.md` sin Tkinter.
 - `src/worker_events.py`: eventos tipados del worker; la GUI los recibe por `queue.Queue`.
 - `src/downloader.py`: caché, Drive API/gdown, reintentos y errores tipados.
 - `src/cropper.py`: recorte MPC opcional, relleno de esquinas y sangrado espejo.

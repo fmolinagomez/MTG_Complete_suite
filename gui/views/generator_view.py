@@ -48,104 +48,32 @@ from gui.widgets import (
 from src.app_settings import AppSettings, load_settings
 from src.cancellation import Cancelled
 from src.constants import CARDS_PER_PAGE, Stage
-from src.deck_importer import DeckCard
+from src.deck_importer import MtgUrlDeck
 from src.downloader import (
     DownloadPartialError,
     DownloadPermissionError,
     DownloadRateLimitError,
     DownloadTimeoutError,
 )
-from src.lorcana_scraper import LocanaDeck, get_lorcana_back
-from src.lorcana_scraper import download_images as lorcana_download
-from src.lorcana_scraper import expand_deck as lorcana_expand
-from src.op_scraper import OPDeck, get_op_backs
-from src.op_scraper import download_images as op_download
-from src.op_scraper import expand_deck as op_expand
+from src.lorcana_scraper import LocanaDeck
+from src.op_scraper import OPDeck
 from src.parser import CardOrder
-from src.pipeline import run_locals_only, run_plan
+from src.pipeline import PrintJobSpec, PrintPipeline, run_locals_only, run_plan
 from src.precheck import (
     XmlReport,
     analyze,
-    check_drive_access,
-    collect_drive_ids,
     format_warning,
     plan,
-    write_manifest,
 )
-from src.print_run import StandalonePrintRun
-from src.rb_scraper import RBDeck, get_rb_backs
-from src.rb_scraper import download_images as rb_download
-from src.rb_scraper import expand_deck as rb_expand
-from src.scraper_utils import resources_dir, sanitize_filename
+from src.rb_scraper import RBDeck
+from src.scraper_utils import resources_dir
 from src.scryfall import download_deck_images as scryfall_download
-from src.tcg_batches import YugiohBatchAdapter
+from src.tcg_batches import create_separator_image
 from src.validator import ValidationWarning
 from src.ygo_scraper import YGODeck
 
 if TYPE_CHECKING:
     from src.engine.task_manager import TaskManager
-
-
-@dataclass
-class MtgUrlDeck:
-    url: str
-    cards: list[DeckCard]
-    include_side: bool = False
-    include_tokens: bool = False
-    name: str = ""
-    back_path: Path | None = None
-    format: str = "commander"
-    include_separator: bool = False
-    selected_card_ids: set[int] | None = None
-
-    @property
-    def display_name(self) -> str:
-        if self.name:
-            return self.name
-        try:
-            platform = self.url.split("/")[2].replace("www.", "")
-            slug = self.url.rstrip("/").split("/")[-1]
-            return f"{platform}/{slug}"
-        except IndexError:
-            return self.url[:40]
-
-    @property
-    def active_count(self) -> int:
-        main_side_count = sum(
-            c.quantity
-            for c in self.cards
-            if (self.selected_card_ids is None or id(c) in self.selected_card_ids)
-            and (c.zone == "main" or (c.zone == "side" and self.include_side))
-        )
-        token_count = 0
-        if self.include_tokens:
-            seen_tokens = set()
-            for c in self.cards:
-                if (self.selected_card_ids is None or id(c) in self.selected_card_ids) and (
-                    c.zone == "token"
-                    and (not c.layout or c.layout in ("token", "emblem", "double_faced_token"))
-                ):
-                    key = ((c.set_code or "").lower(), c.collector_number or "")
-                    if key not in seen_tokens:
-                        seen_tokens.add(key)
-                        token_count += 1
-        base = main_side_count + token_count
-        if self.include_separator:
-            base += 1
-        return base
-
-    def includes(self, card: DeckCard) -> bool:
-        if self.selected_card_ids is not None and id(card) not in self.selected_card_ids:
-            return False
-        if card.zone == "main":
-            return True
-        if card.zone == "side":
-            return self.include_side
-        if card.zone == "token":
-            return self.include_tokens and (
-                not card.layout or card.layout in ("token", "emblem", "double_faced_token")
-            )
-        return False
 
 
 @dataclass
@@ -940,7 +868,6 @@ class GeneratorView(
 
             run_dir = out / datetime.now().strftime("%d_%m_%Y_%H-%M-%S")
             run_dir.mkdir(parents=True, exist_ok=True)
-            generated: list[Path] = []
             extra_backs = self._resolve_extra_backs()
             crop_map = self._build_crop_map()
 
@@ -955,523 +882,111 @@ class GeneratorView(
                 if done == total and total > 0:
                     _phase_done[stage] = now
 
-            op_fronts: list[Path] = []
-            op_backs_resolved: list[Path] = []
-            op_crop_extra: dict[Path, bool] = {}
-            op_standard_back: Path | None = None
+            _pdf_label = [""]
 
-            if self._op_decks:
-                op_raw_dir = wd / "op_raw"
-                op_label = " + ".join(d.name for d in self._op_decks)
-                op_total_unique = sum(len({c.card_id for c in d.cards}) for d in self._op_decks)
-                self.events.put(
-                    ("progress", "download", 0, op_total_unique, f"One Piece – {op_label}")
+            def cb(stage: str, done: int, total: int) -> None:
+                _track(stage, done, total)
+                name = _pdf_label[0] if stage == "pdf" else "Todas las imágenes"
+                self.events.put(("progress", stage, done, total, name))
+
+            def on_stage_progress(stage: str, done: int, total: int, label: str) -> None:
+                _track(stage, done, total)
+                self.events.put(("progress", stage, done, total, label))
+
+            def on_job_pdf_start(job_idx: int, total_jobs: int, job_name: str) -> None:
+                job = (
+                    next((j for j in plan_.jobs if j.base_name == job_name), None)
+                    if plan_ is not None
+                    else None
                 )
-                image_map_op: dict[str, Path] = {}
-                done_dl_op = 0
-                for deck in self._op_decks:
-                    _off_op = done_dl_op
+                label = job_name + (" (fusión)" if job and job.is_merged else "")
+                _pdf_label[0] = label
+                self.events.put(("file", job_idx, total_jobs, label))
 
-                    def _op_prog(done, total, _o=_off_op, _t=op_total_unique, _lbl=op_label):
-                        _track("download", _o + done, _t)
-                        self.events.put(
-                            ("progress", "download", _o + done, _t, f"One Piece – {_lbl}")
-                        )
+            def on_xml_download_progress(xml_name: str, done: int, total: int) -> None:
+                self.events.put(("xml_download_progress", xml_name, done, total))
 
-                    part = op_download(
-                        deck, op_raw_dir, cancel_event=effective_cancel, progress_cb=_op_prog
-                    )
-                    image_map_op.update(part)
-                    done_dl_op += len({c.card_id for c in deck.cards})
+            def on_xml_crop_progress(xml_name: str, done: int, total: int) -> None:
+                self.events.put(("xml_crop_progress", xml_name, done, total))
+
+            def on_speed_update(speed_mbps: float, eta_sec: float) -> None:
+                self.events.put(("download_speed", speed_mbps, eta_sec))
+
+            def on_verify_warning(inaccessible: list[tuple[str, str]]) -> bool:
+                confirm_event = threading.Event()
+                self.events.put(("verify_warning", inaccessible, confirm_event))
+                while not confirm_event.wait(timeout=0.1):
                     if effective_cancel.is_set():
-                        self.events.put(("cancelled", run_dir))
-                        return
-                op_standard_back, op_leader_back_res = get_op_backs()
-                leader_backs_op: dict[str, Path] = {}
-                for deck in self._op_decks:
-                    if deck.leader and deck.leader.card_id not in leader_backs_op:
-                        leader_backs_op[deck.leader.card_id] = op_leader_back_res
-                for deck in self._op_decks:
-                    lb = leader_backs_op.get(deck.leader.card_id) if deck.leader else None
-                    fronts_op, backs_op = op_expand(deck, image_map_op, lb, op_standard_back)
-                    op_fronts.extend(fronts_op)
-                    op_backs_resolved.extend(op_standard_back if b is None else b for b in backs_op)
-                op_all_back_paths = {op_standard_back} | set(leader_backs_op.values())
-                op_crop_extra = {p: False for p in set(op_fronts) | op_all_back_paths}
+                        return False
+                return not effective_cancel.is_set()
 
-            rb_fronts: list[Path] = []
-            rb_backs_resolved: list[Path] = []
-            rb_crop_extra: dict[Path, bool] = {}
-            rb_default_back: Path | None = None
-
-            if self._rb_decks:
-                rb_raw_dir = wd / "rb_raw"
-                rb_label = " + ".join(d.name for d in self._rb_decks)
-                rb_total_unique = sum(len({c.variant_id for c in d.cards}) for d in self._rb_decks)
-                self.events.put(
-                    ("progress", "download", 0, rb_total_unique, f"Riftbound – {rb_label}")
+            print_runes_flags = [row["print_runes_var"].get() for row in self._rb_deck_rows]
+            rb_decks_with_flags = [
+                (
+                    deck,
+                    print_runes_flags[idx] if idx < len(print_runes_flags) else True,
                 )
-                image_map_rb: dict[str, Path] = {}
-                done_dl_rb = 0
-                for deck in self._rb_decks:
-                    _off_rb = done_dl_rb
+                for idx, deck in enumerate(self._rb_decks)
+            ]
 
-                    def _rb_prog(done, total, _o=_off_rb, _t=rb_total_unique, _lbl=rb_label):
-                        _track("download", _o + done, _t)
-                        self.events.put(
-                            ("progress", "download", _o + done, _t, f"Riftbound – {_lbl}")
-                        )
+            if (
+                plan_ is None
+                and not self.state.local_fronts
+                and not self._op_decks
+                and not rb_decks_with_flags
+                and not self._lorcana_decks
+                and not self.state.mtg_url_decks
+                and not ygo_decks
+            ):
+                raise ValueError("No hay cartas para generar.")
 
-                    part = rb_download(
-                        deck, rb_raw_dir, cancel_event=effective_cancel, progress_cb=_rb_prog
-                    )
-                    image_map_rb.update(part)
-                    done_dl_rb += len({c.variant_id for c in deck.cards})
-                    if effective_cancel.is_set():
-                        self.events.put(("cancelled", run_dir))
-                        return
-                rb_backs_map = get_rb_backs()
-                rb_default_back = rb_backs_map.get("maindeck") or next(iter(rb_backs_map.values()))
-                rb_all_back_paths = set(rb_backs_map.values())
-                print_runes_flags = [row["print_runes_var"].get() for row in self._rb_deck_rows]
-                for idx, deck in enumerate(self._rb_decks):
-                    include_runes = print_runes_flags[idx] if idx < len(print_runes_flags) else True
-                    fronts_rb, backs_rb = rb_expand(
-                        deck, image_map_rb, rb_backs_map, include_runes=include_runes
-                    )
-                    rb_fronts.extend(fronts_rb)
-                    rb_backs_resolved.extend(rb_default_back if b is None else b for b in backs_rb)
-                rb_crop_extra = {p: False for p in set(rb_fronts) | rb_all_back_paths}
-
-            lorcana_fronts: list[Path] = []
-            lorcana_backs_resolved: list[Path | None] = []
-            lorcana_crop_extra: dict[Path, bool] = {}
-            lorcana_default_back: Path | None = None
-
-            if self._lorcana_decks:
-                lorcana_raw_dir = wd / "lorcana_raw"
-                lorcana_label = " + ".join(d.name for d in self._lorcana_decks)
-                lorcana_total_unique = sum(
-                    len({c.card_id for c in d.cards}) for d in self._lorcana_decks
-                )
-                self.events.put(
-                    (
-                        "progress",
-                        "download",
-                        0,
-                        lorcana_total_unique,
-                        f"Lorcana – {lorcana_label}",
-                    )
-                )
-                image_map_lorcana: dict[str, Path] = {}
-                done_dl_lorcana = 0
-                for deck in self._lorcana_decks:
-                    _off_lorcana = done_dl_lorcana
-
-                    def _lorcana_prog(
-                        done, total, _o=_off_lorcana, _t=lorcana_total_unique, _lbl=lorcana_label
-                    ):
-                        _track("download", _o + done, _t)
-                        self.events.put(
-                            ("progress", "download", _o + done, _t, f"Lorcana – {_lbl}")
-                        )
-
-                    part = lorcana_download(
-                        deck,
-                        lorcana_raw_dir,
-                        cancel_event=effective_cancel,
-                        progress_cb=_lorcana_prog,
-                    )
-                    image_map_lorcana.update(part)
-                    done_dl_lorcana += len({c.card_id for c in deck.cards})
-                    if effective_cancel.is_set():
-                        self.events.put(("cancelled", run_dir))
-                        return
-                lorcana_back = get_lorcana_back()
-                lorcana_default_back = lorcana_back
-                for deck in self._lorcana_decks:
-                    fronts_lorcana, backs_lorcana = lorcana_expand(deck, image_map_lorcana)
-                    lorcana_fronts.extend(fronts_lorcana)
-                    lorcana_backs_resolved.extend(
-                        lorcana_back if b is None else b for b in backs_lorcana
-                    )
-                lorcana_crop_extra = {p: False for p in set(lorcana_fronts) | {lorcana_back}}
-
-            mtg_fronts: list[Path] = []
-            mtg_backs_resolved: list[Path] = []
-            mtg_crop_extra: dict[Path, bool] = {}
-            mtg_default_back: Path | None = None
-
-            if self.state.mtg_url_decks:
-                mtg_default_back = resources_dir() / "backs" / "mtg" / "back.jpg"
-                scryfall_dir = wd / "scryfall"
-
-                decks_with_cards = []
-                for _deck in self.state.mtg_url_decks:
-                    deck_cards = [
-                        c
-                        for c in _deck.cards
-                        if c.zone == "main"
-                        or (c.zone == "side" and _deck.include_side)
-                        or (
-                            c.zone == "token"
-                            and _deck.include_tokens
-                            and c.layout in ("token", "emblem", "double_faced_token")
-                        )
-                    ]
-
-                    commander_card = None
-                    for c in _deck.cards:
-                        if getattr(c, "is_commander", False):
-                            commander_card = c
-                            break
-                    if not commander_card:
-                        for c in _deck.cards:
-                            if c.zone == "main":
-                                commander_card = c
-                                break
-
-                    active_cards = []
-                    seen_tokens = set()
-                    from copy import copy
-
-                    for c in deck_cards:
-                        if c.quantity <= 0:
-                            continue
-                        if c.zone == "token":
-                            key = ((c.set_code or "").lower(), c.collector_number or "")
-                            if key in seen_tokens:
-                                continue
-                            seen_tokens.add(key)
-                            c_copy = copy(c)
-                            c_copy.quantity = 1
-                            active_cards.append(c_copy)
-                        else:
-                            active_cards.append(c)
-
-                    zone_order = {"main": 0, "token": 1, "side": 2}
-                    active_cards.sort(key=lambda x: (zone_order.get(x.zone, 0), x.name.casefold()))
-
-                    decks_with_cards.append(
-                        {
-                            "deck": _deck,
-                            "active_cards": active_cards,
-                            "commander": commander_card,
-                        }
-                    )
-
-                mtg_cards_all = []
-                for item in decks_with_cards:
-                    mtg_cards_all.extend(item["active_cards"])
-                    if item["commander"] and not any(
-                        c.name == item["commander"].name
-                        and c.set_code == item["commander"].set_code
-                        and c.collector_number == item["commander"].collector_number
-                        for c in item["active_cards"]
-                    ):
-                        from copy import copy
-
-                        comm_dummy = copy(item["commander"])
-                        comm_dummy.quantity = 0
-                        mtg_cards_all.append(comm_dummy)
-
-                mtg_label = f"Magic – {len(self.state.mtg_url_decks)} mazo(s)"
-                self.events.put(("progress", "download", 0, len(mtg_cards_all), mtg_label))
-
-                def _mtg_prog(done: int, total: int) -> None:
-                    _track("download", done, total)
-                    self.events.put(("progress", "download", done, total, mtg_label))
-
-                dl_results = scryfall_download(
-                    mtg_cards_all,
-                    scryfall_dir,
-                    _mtg_prog,
-                    cancel_event=effective_cancel,
-                    lang=self._settings.scryfall_lang,
-                    quality=self._settings.scryfall_quality,
-                    fail_policy=self._settings.scryfall_fail_policy,
-                    quality_check=self._settings.scryfall_quality_check,
-                    blur_threshold=self._settings.scryfall_blur_threshold,
-                    brightness_contrast_check=self._settings.scryfall_brightness_contrast_check,
-                )
-
-                if effective_cancel.is_set():
-                    self.events.put(("cancelled", run_dir))
-                    return
-
-                image_map = {}
-                for card, front_path, back_path in dl_results:
-                    image_map[(card.set_code.lower(), card.collector_number)] = (
-                        front_path,
-                        back_path,
-                    )
-
-                local_back_set = set(self.state.local_backs)
-                all_mtg_back_paths: set[Path] = {mtg_default_back}
-
-                printed_tokens_global = set()
-                for idx, item in enumerate(decks_with_cards):
-                    _deck = item["deck"]
-
-                    if _deck.include_separator:
-                        sep_front_path = scryfall_dir / f"separator_{idx}.jpg"
-                        sep_back_path = mtg_default_back
-
-                        try:
-                            self._create_separator_image(
-                                _deck.display_name, _deck.format, _deck.cards, sep_front_path
-                            )
-                        except Exception as e:
-                            _log.error("Error al crear la carta separadora: %s", e)
-                            sep_front_path = None
-
-                        if _deck.back_path in local_back_set:
-                            sep_back_path = _deck.back_path
-
-                        if sep_front_path and sep_front_path.exists():
-                            mtg_fronts.append(sep_front_path)
-                            mtg_backs_resolved.append(sep_back_path)
-                            if sep_back_path:
-                                all_mtg_back_paths.add(sep_back_path)
-
-                    for card in item["active_cards"]:
-                        comp_key = (card.set_code.lower(), card.collector_number)
-                        front_path, back_path = image_map.get(comp_key, (None, None))
-                        if not front_path or not front_path.exists():
-                            continue
-
-                        if card.zone == "token" and self._settings.scryfall_minimize_tokens:
-                            if comp_key in printed_tokens_global:
-                                continue
-                            printed_tokens_global.add(comp_key)
-
-                        if back_path is not None:
-                            resolved_back = back_path
-                        elif _deck.back_path in local_back_set:
-                            resolved_back = _deck.back_path
-                        else:
-                            resolved_back = mtg_default_back
-
-                        all_mtg_back_paths.add(resolved_back)
-
-                        for _ in range(card.quantity):
-                            mtg_fronts.append(front_path)
-                            mtg_backs_resolved.append(resolved_back)
-
-                mtg_crop_extra = {
-                    p: False
-                    for p in set(mtg_fronts) | all_mtg_back_paths
-                    if p not in local_back_set
-                }
-
-            all_extra_fronts = (
-                list(self.state.local_fronts) + op_fronts + rb_fronts + lorcana_fronts + mtg_fronts
+            spec = PrintJobSpec(
+                jobs=plan_.jobs if plan_ is not None else [],
+                plan=plan_,
+                reports=reports,
+                extra_fronts=list(self.state.local_fronts),
+                extra_backs=list(extra_backs),
+                local_backs=list(self.state.local_backs),
+                local_cardback=self.state.local_backs[0] if self.state.local_backs else None,
+                local_crop_map=crop_map,
+                op_decks=list(self._op_decks),
+                rb_decks=rb_decks_with_flags,
+                lorcana_decks=list(self._lorcana_decks),
+                mtg_decks=list(self.state.mtg_url_decks),
+                ygo_decks=list(ygo_decks),
+                deck_lang=self._settings.scryfall_lang,
+                deck_quality=self._settings.scryfall_quality,
+                deck_fail_policy=self._settings.scryfall_fail_policy,
+                deck_quality_check=self._settings.scryfall_quality_check,
+                deck_blur_threshold=self._settings.scryfall_blur_threshold,
+                deck_brightness_contrast_check=self._settings.scryfall_brightness_contrast_check,
+                deck_minimize_tokens=self._settings.scryfall_minimize_tokens,
+                output_dir=run_dir,
+                work_dir=wd,
+                fronts_only=fronts_only,
+                cut_line_color=cut_line_color,
+                cut_line_style=cut_line_style,
+                cut_line_width=cut_line_width,
+                cut_line_over_cards=cut_line_over_cards,
+                cut_line_over_fronts=cut_line_over_fronts,
+                cut_line_over_backs=cut_line_over_backs,
+                max_pdf_bytes=max_pdf_bytes,
+                verify_drive_access=plan_ is not None,
+                on_verify_warning=on_verify_warning,
+                on_stage_progress=on_stage_progress,
+                cancel_event=effective_cancel,
+                on_job_pdf_start=on_job_pdf_start,
+                on_xml_download_progress=on_xml_download_progress,
+                on_xml_crop_progress=on_xml_crop_progress,
+                on_speed_update=on_speed_update,
+                scryfall_downloader=scryfall_download,
+                separator_creator=self._create_separator_image,
+                mtg_default_back=resources_dir() / "backs" / "mtg" / "back.jpg",
+                locals_runner=run_locals_only,
+                plan_runner=run_plan,
             )
-            all_extra_backs: list[Path | None] = (
-                list(extra_backs)
-                + op_backs_resolved
-                + rb_backs_resolved
-                + lorcana_backs_resolved
-                + mtg_backs_resolved
-            )
-            all_crop_map = {
-                **crop_map,
-                **op_crop_extra,
-                **rb_crop_extra,
-                **lorcana_crop_extra,
-                **mtg_crop_extra,
-            }
 
-            if plan_ is not None:
-                xml_paths_flat = [Path(p) for job in plan_.jobs for p in job.xml_paths]
-                all_ids = collect_drive_ids(xml_paths_flat)
-                raw_dir = wd / "raw"
-                to_check = [
-                    (did, name) for did, name in all_ids if not list(raw_dir.glob(f"{did}.*"))
-                ]
-                if to_check:
-                    self.events.put(
-                        ("progress", Stage.VERIFY, 0, len(to_check), "XML seleccionados")
-                    )
-
-                    def _verify_cb(done, total):
-                        _track(Stage.VERIFY, done, total)
-                        self.events.put(
-                            ("progress", Stage.VERIFY, done, total, "XML seleccionados")
-                        )
-
-                    inaccessible = check_drive_access(to_check, _verify_cb)
-
-                    if inaccessible and not effective_cancel.is_set():
-                        confirm_event = threading.Event()
-                        self.events.put(("verify_warning", inaccessible, confirm_event))
-                        while not confirm_event.wait(timeout=0.1):
-                            if effective_cancel.is_set():
-                                break
-
-                if effective_cancel.is_set():
-                    self.events.put(("cancelled", run_dir))
-                    return
-
-                _pdf_label = [""]
-
-                def cb(stage, done, total):
-                    _track(stage, done, total)
-                    name = _pdf_label[0] if stage == "pdf" else "Todas las imágenes"
-                    self.events.put(("progress", stage, done, total, name))
-
-                def on_job_pdf_start(job_idx, total_jobs, job_name):
-                    job = next((j for j in plan_.jobs if j.base_name == job_name), None)
-                    label = job_name + (" (fusión)" if job and job.is_merged else "")
-                    _pdf_label[0] = label
-                    self.events.put(("file", job_idx, total_jobs, label))
-
-                def on_xml_download_progress(xml_name, done, total):
-                    self.events.put(("xml_download_progress", xml_name, done, total))
-
-                def on_xml_crop_progress(xml_name, done, total):
-                    self.events.put(("xml_crop_progress", xml_name, done, total))
-
-                def on_speed_update(speed_mbps: float, eta_sec: float) -> None:
-                    self.events.put(("download_speed", speed_mbps, eta_sec))
-
-                pdfs = run_plan(
-                    plan_.jobs,
-                    run_dir,
-                    wd,
-                    cb,
-                    cancel_event=effective_cancel,
-                    extra_fronts=all_extra_fronts or None,
-                    extra_backs=all_extra_backs or None,
-                    local_crop_map=all_crop_map or None,
-                    on_job_pdf_start=on_job_pdf_start,
-                    on_xml_download_progress=on_xml_download_progress,
-                    on_xml_crop_progress=on_xml_crop_progress,
-                    fronts_only=fronts_only,
-                    on_speed_update=on_speed_update,
-                    cut_line_color=cut_line_color,
-                    cut_line_style=cut_line_style,
-                    cut_line_width=cut_line_width,
-                    cut_line_over_cards=cut_line_over_cards,
-                    cut_line_over_fronts=cut_line_over_fronts,
-                    cut_line_over_backs=cut_line_over_backs,
-                    max_pdf_bytes=max_pdf_bytes,
-                )
-                generated.extend(pdfs)
-                manifest = write_manifest(plan_, reports, run_dir)
-            else:
-                if not all_extra_fronts and not ygo_decks:
-                    raise ValueError("No hay cartas para generar.")
-                if all_extra_fronts:
-                    if self.state.local_fronts and self.state.local_backs:
-                        default_back: Path = self.state.local_backs[0]
-                    elif op_standard_back is not None:
-                        default_back = op_standard_back
-                    elif rb_default_back is not None:
-                        default_back = rb_default_back
-                    elif lorcana_default_back is not None:
-                        default_back = lorcana_default_back
-                    elif mtg_default_back is not None:
-                        default_back = mtg_default_back
-                    else:
-                        raise ValueError("No se encontró reverso por defecto.")
-                    total_decks = (
-                        len(self.state.mtg_url_decks)
-                        + len(self._op_decks)
-                        + len(self._rb_decks)
-                        + len(self._lorcana_decks)
-                    )
-                    if total_decks == 1 and not self.state.local_fronts:
-                        if self.state.mtg_url_decks:
-                            deck_name = self.state.mtg_url_decks[0].name
-                        elif self._op_decks:
-                            deck_name = self._op_decks[0].name
-                        elif self._rb_decks:
-                            deck_name = self._rb_decks[0].name
-                        elif self._lorcana_decks:
-                            deck_name = self._lorcana_decks[0].name
-                        else:
-                            deck_name = ""
-
-                        if deck_name and deck_name.strip():
-                            base = sanitize_filename(deck_name)
-                        else:
-                            base = "combinado"
-                    else:
-                        parts = [
-                            p
-                            for p in [
-                                "locales" if self.state.local_fronts else None,
-                                "One Piece" if op_fronts else None,
-                                "Riftbound" if rb_fronts else None,
-                                "Lorcana" if lorcana_fronts else None,
-                                "magic_url" if mtg_fronts else None,
-                            ]
-                            if p
-                        ]
-                        base = "_".join(parts) if parts else "combinado"
-                    self.events.put(("file", 1, 1, base))
-
-                    def cb(stage, done, total, _label=base):
-                        _track(stage, done, total)
-                        self.events.put(("progress", stage, done, total, _label))
-
-                    pdfs = run_locals_only(
-                        all_extra_fronts,
-                        default_back,
-                        run_dir,
-                        base,
-                        wd,
-                        cb,
-                        cancel_event=effective_cancel,
-                        extra_backs=all_extra_backs,
-                        local_crop_map=all_crop_map,
-                        fronts_only=fronts_only,
-                        cut_line_color=cut_line_color,
-                        cut_line_style=cut_line_style,
-                        cut_line_width=cut_line_width,
-                        cut_line_over_cards=cut_line_over_cards,
-                        cut_line_over_fronts=cut_line_over_fronts,
-                        cut_line_over_backs=cut_line_over_backs,
-                        max_pdf_bytes=max_pdf_bytes,
-                    )
-                    generated.extend(pdfs)
-                manifest = None
-
-            if ygo_decks:
-
-                def _report_tcg(stage: str, done: int, total: int, label: str) -> None:
-                    _track(stage, done, total)
-                    self.events.put(("progress", stage, done, total, label))
-
-                ygo_batch = YugiohBatchAdapter(
-                    ygo_decks, wd, effective_cancel, _report_tcg
-                ).prepare()
-                if effective_cancel.is_set():
-                    self.events.put(("cancelled", run_dir))
-                    return
-                if ygo_batch.fronts:
-                    self.events.put(("file", 1, 1, ygo_batch.name))
-
-                    def _ygo_progress(stage, done, total, _label=ygo_batch.name):
-                        _track(stage, done, total)
-                        self.events.put(("progress", stage, done, total, _label))
-
-                    ygo_pdfs = StandalonePrintRun(ygo_batch).render(
-                        run_dir,
-                        wd,
-                        _ygo_progress,
-                        effective_cancel,
-                        fronts_only=fronts_only,
-                        cut_line_color=cut_line_color,
-                        cut_line_style=cut_line_style,
-                        cut_line_width=cut_line_width,
-                        cut_line_over_cards=cut_line_over_cards,
-                        cut_line_over_fronts=cut_line_over_fronts,
-                        cut_line_over_backs=cut_line_over_backs,
-                        max_pdf_bytes=max_pdf_bytes,
-                    )
-                    generated.extend(ygo_pdfs)
+            result = PrintPipeline.execute(spec, progress_callback=cb)
 
             if not self.keep_cache.get():
                 self._cleanup_workdir(wd)
@@ -1495,70 +1010,15 @@ class GeneratorView(
             if timing_str:
                 timing_str += f"  Total: {_fmt_dur(total_dur)}"
 
-            skipped_tokens_count = 0
-            if self.state.mtg_url_decks:
-                for _deck in self.state.mtg_url_decks:
-                    if _deck.include_tokens:
-                        skipped_tokens_count += sum(
-                            c.quantity
-                            for c in _deck.cards
-                            if c.zone == "token"
-                            and c.layout not in ("token", "emblem", "double_faced_token")
-                        )
-
-            if self.state.mtg_url_decks:
-                has_any_tokens = False
-                for _deck in self.state.mtg_url_decks:
-                    if any(c.zone == "token" for c in _deck.cards):
-                        has_any_tokens = True
-                        break
-
-                if has_any_tokens:
-                    md_path = run_dir / "tokens.md"
-                    md_lines = ["# Fichas Necesarias por Mazo", ""]
-                    for _deck in self.state.mtg_url_decks:
-                        md_lines.append(f"## Mazo: {_deck.display_name}")
-                        tokens = [c for c in _deck.cards if c.zone == "token"]
-                        if not tokens:
-                            md_lines.append("No se necesitan fichas.")
-                            md_lines.append("")
-                            continue
-
-                        token_groups = {}
-                        for c in tokens:
-                            key = (
-                                c.name,
-                                (c.set_code or "").lower(),
-                                c.collector_number or "",
-                                c.layout,
-                            )
-                            token_groups[key] = token_groups.get(key, 0) + c.quantity
-
-                        for (name, set_code, cn, layout), qty in sorted(
-                            token_groups.items(), key=lambda x: x[0][0].casefold()
-                        ):
-                            is_valid = layout in ("token", "emblem", "double_faced_token")
-                            is_included = _deck.include_tokens and is_valid
-                            inc_str = (
-                                "Incluida en el PDF" if is_included else "No incluida en el PDF"
-                            )
-                            details = []
-                            if set_code:
-                                details.append(set_code.upper())
-                            if cn:
-                                details.append(cn)
-                            details_str = f" ({' '.join(details)})" if details else ""
-                            md_lines.append(f"- {qty}x {name}{details_str} — *{inc_str}*")
-                        md_lines.append("")
-
-                    try:
-                        md_path.write_text("\n".join(md_lines), encoding="utf-8")
-                        _log.info("Archivo tokens.md generado en: %s", md_path)
-                    except Exception as e:
-                        _log.error("No se pudo escribir tokens.md: %s", e)
-
             self.events.put(
-                ("done", generated, manifest, run_dir, timing_str, skipped_tokens_count)
+                (
+                    "done",
+                    result.pdf_paths,
+                    result.manifest_path,
+                    run_dir,
+                    timing_str,
+                    result.skipped_tokens_count,
+                )
             )
         except DownloadPartialError as e:
             self.events.put(
@@ -1593,399 +1053,7 @@ class GeneratorView(
         if run_dir.exists():
             shutil.rmtree(run_dir, ignore_errors=True)
 
-    @staticmethod
-    def _create_separator_image(
-        deck_name: str, deck_format: str, cards: list, output_path: Path
-    ) -> None:
-        from PIL import Image, ImageDraw, ImageFont
-
-        w, h = 745, 1040
-        img = Image.new("RGB", (w, h))
-        draw_g = ImageDraw.Draw(img)
-        for y in range(h):
-            r = int(46 - (46 - 19) * (y / h))
-            g = int(40 - (40 - 17) * (y / h))
-            b = int(34 - (34 - 16) * (y / h))
-            draw_g.line([(0, y), (w, y)], fill=(r, g, b))
-
-        overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        draw_ol = ImageDraw.Draw(overlay)
-
-        y0 = 60
-        y1 = y0 + 170
-        y_center = (y0 + y1) // 2
-        x0 = 80
-        x1 = w - 80
-        cx = w // 2
-
-        r_plaque = int(w * 0.027)
-        r_inner = int(w * 0.020)
-
-        shadow_offset = int(w * 0.008)
-        shadow_rect = [
-            x0 - 4 + shadow_offset,
-            y0 - 4 + shadow_offset,
-            x1 + 4 + shadow_offset,
-            y1 + 4 + shadow_offset,
-        ]
-        draw_ol.rounded_rectangle(shadow_rect, radius=r_plaque, fill=(0, 0, 0, 180))
-
-        stone_color = (60, 55, 50, 255)
-        inner_stone_color = (74, 69, 64, 255)
-        draw_ol.rounded_rectangle([x0, y0, x1, y1], radius=r_plaque, fill=stone_color)
-        draw_ol.rounded_rectangle(
-            [x0 + 8, y0 + 8, x1 - 8, y1 - 8], radius=r_inner, fill=inner_stone_color
-        )
-
-        bronze_color = (42, 34, 21, 255)
-        gold_color = (197, 165, 96, 255)
-        light_gold = (234, 210, 149, 255)
-
-        w_outer_bronze = max(2, int(w * 0.008))
-        w_outer_gold = max(1, int(w * 0.0027))
-        w_inner_bronze = max(1, int(w * 0.0054))
-
-        draw_ol.rounded_rectangle(
-            [x0, y0, x1, y1], radius=r_plaque, outline=bronze_color, width=w_outer_bronze
-        )
-        draw_ol.rounded_rectangle(
-            [x0 + 2, y0 + 2, x1 - 2, y1 - 2],
-            radius=r_plaque - 2,
-            outline=gold_color,
-            width=w_outer_gold,
-        )
-        draw_ol.rounded_rectangle(
-            [x0 + 8, y0 + 8, x1 - 8, y1 - 8],
-            radius=r_inner,
-            outline=bronze_color,
-            width=w_inner_bronze,
-        )
-
-        corner_r = int(w * 0.033)
-        draw_ol.arc(
-            [x0 - corner_r, y0 - corner_r, x0 + corner_r, y0 + corner_r],
-            90,
-            270,
-            fill=gold_color,
-            width=w_outer_gold,
-        )
-        draw_ol.arc(
-            [x0 - corner_r + 4, y0 - corner_r + 4, x0 + corner_r - 4, y0 + corner_r - 4],
-            90,
-            270,
-            fill=bronze_color,
-            width=1,
-        )
-        draw_ol.arc(
-            [x0 - corner_r, y1 - corner_r, x0 + corner_r, y1 + corner_r],
-            180,
-            360,
-            fill=gold_color,
-            width=w_outer_gold,
-        )
-        draw_ol.arc(
-            [x1 - corner_r, y0 - corner_r, x1 + corner_r, y0 + corner_r],
-            270,
-            90,
-            fill=gold_color,
-            width=w_outer_gold,
-        )
-        draw_ol.arc(
-            [x1 - corner_r, y1 - corner_r, x1 + corner_r, y1 + corner_r],
-            0,
-            180,
-            fill=gold_color,
-            width=w_outer_gold,
-        )
-
-        draw_ol.line([(x0 + 40, y0), (cx - 40, y0)], fill=bronze_color, width=w_inner_bronze)
-        draw_ol.line([(cx + 40, y0), (x1 - 40, y0)], fill=bronze_color, width=w_inner_bronze)
-        draw_ol.line([(x0 + 40, y1), (cx - 40, y1)], fill=bronze_color, width=w_inner_bronze)
-        draw_ol.line([(cx + 40, y1), (x1 - 40, y1)], fill=bronze_color, width=w_inner_bronze)
-
-        c_white = (243, 230, 199, 255)
-        c_blue = (80, 115, 169, 255)
-        c_black = (50, 48, 47, 255)
-        c_red = (192, 92, 70, 255)
-        c_green = (62, 111, 83, 255)
-
-        r1 = int(w * 0.040)
-        r2 = int(w * 0.037)
-        r3 = int(w * 0.029)
-
-        medallions = [
-            (x0 - 6, y_center, r1, c_red),
-            (x1 + 6, y_center, r1, c_green),
-            (cx, y0 - 6, r2, c_blue),
-            (cx, y1 + 6, r2, c_black),
-            (x0 + (cx - x0) // 2, y0 - 3, r3, c_white),
-            (cx + (x1 - cx) // 2, y0 - 3, r3, c_black),
-            (x0 + (cx - x0) // 2, y1 + 3, r3, c_blue),
-            (cx + (x1 - cx) // 2, y1 + 3, r3, c_red),
-        ]
-
-        for mx, my, mr, mcolor in medallions:
-            draw_ol.ellipse([mx - mr, my - mr, mx + mr, my + mr], fill=bronze_color)
-            draw_ol.ellipse(
-                [mx - mr + 3, my - mr + 3, mx + mr - 3, my + mr - 3], outline=gold_color, width=2
-            )
-            draw_ol.ellipse(
-                [mx - mr + 6, my - mr + 6, mx + mr - 6, my + mr - 6], fill=(20, 15, 10, 255)
-            )
-            gem_r = mr - 9
-            draw_ol.ellipse([mx - gem_r, my - gem_r, mx + gem_r, my + gem_r], fill=mcolor)
-            glint_r = gem_r // 3
-            if glint_r > 0:
-                draw_ol.ellipse(
-                    [mx - glint_r - 2, my - glint_r - 2, mx + glint_r - 2, my + glint_r - 2],
-                    fill=(255, 255, 255, 150),
-                )
-
-        img_composite = Image.alpha_composite(img.convert("RGBA"), overlay)
-        img = img_composite.convert("RGB")
-        draw = ImageDraw.Draw(img)
-
-        font_title = None
-        font_sub = None
-        font_stats_header = None
-        font_stats_val = None
-
-        title_size = 38
-        sub_size = 20
-        stats_header_size = 22
-        stats_val_size = 26
-
-        title_font_names = [
-            "/System/Library/Fonts/Supplemental/Georgia Bold.ttf",
-            "Georgia Bold",
-            "Arial Bold",
-        ]
-        sub_font_names = [
-            "/System/Library/Fonts/Supplemental/Georgia Italic.ttf",
-            "Georgia Italic",
-            "Arial Italic",
-        ]
-        stats_header_names = [
-            "/System/Library/Fonts/Supplemental/Georgia Bold.ttf",
-            "Georgia Bold",
-            "Arial Bold",
-        ]
-        stats_val_names = ["/System/Library/Fonts/Supplemental/Georgia.ttf", "Georgia", "Arial"]
-
-        for f_name in title_font_names:
-            try:
-                font_title = ImageFont.truetype(f_name, title_size)
-                break
-            except OSError:
-                continue
-        if font_title is None:
-            font_title = ImageFont.load_default()
-
-        for f_name in sub_font_names:
-            try:
-                font_sub = ImageFont.truetype(f_name, sub_size)
-                break
-            except OSError:
-                continue
-        if font_sub is None:
-            font_sub = ImageFont.load_default()
-
-        for f_name in stats_header_names:
-            try:
-                font_stats_header = ImageFont.truetype(f_name, stats_header_size)
-                break
-            except OSError:
-                continue
-        if font_stats_header is None:
-            font_stats_header = ImageFont.load_default()
-
-        for f_name in stats_val_names:
-            try:
-                font_stats_val = ImageFont.truetype(f_name, stats_val_size)
-                break
-            except OSError:
-                continue
-        if font_stats_val is None:
-            font_stats_val = ImageFont.load_default()
-
-        title_text = deck_name.upper()
-        max_title_w = (x1 - x0) - 40
-        while title_size > 14:
-            try:
-                bbox = draw.textbbox((0, 0), title_text, font=font_title)
-                tw = bbox[2] - bbox[0]
-                th = bbox[3] - bbox[1]
-                y_offset_t = bbox[1]
-            except AttributeError:
-                tw, th = draw.textsize(title_text, font=font_title)
-                y_offset_t = 0
-            if tw <= max_title_w:
-                break
-            title_size -= 2
-            for f_name in title_font_names:
-                try:
-                    font_title = ImageFont.truetype(f_name, title_size)
-                    break
-                except OSError:
-                    continue
-
-        try:
-            bbox_t = draw.textbbox((0, 0), title_text, font=font_title)
-            tw = bbox_t[2] - bbox_t[0]
-            th = bbox_t[3] - bbox_t[1]
-            y_offset_t = bbox_t[1]
-        except AttributeError:
-            tw, th = draw.textsize(title_text, font=font_title)
-            y_offset_t = 0
-
-        FORMAT_TRANSLATION = {
-            "commander": "Commander",
-            "standard": "Standard",
-            "modern": "Modern",
-            "pauper": "Pauper",
-            "legacy": "Legacy",
-            "vintage": "Vintage",
-            "pioneer": "Pioneer",
-            "cedh": "cEDH",
-        }
-        fmt_pretty = FORMAT_TRANSLATION.get(deck_format.lower(), deck_format.title())
-        sub_text = f"Mazo de {fmt_pretty}"
-
-        try:
-            bbox_s = draw.textbbox((0, 0), sub_text, font=font_sub)
-            sw = bbox_s[2] - bbox_s[0]
-            sh = bbox_s[3] - bbox_s[1]
-            y_offset_s = bbox_s[1]
-        except AttributeError:
-            sw, sh = draw.textsize(sub_text, font=font_sub)
-            y_offset_s = 0
-
-        tx = (w - tw) // 2
-        ty = y_center - th - 5 - y_offset_t
-        sx = (w - sw) // 2
-        sy = y_center + 10 - y_offset_s
-
-        draw.text((tx + 2, ty + 2), title_text, fill=(0, 0, 0), font=font_title)
-        draw.text((tx - 1, ty - 1), title_text, fill=(0, 0, 0), font=font_title)
-        draw.text((tx + 1, ty - 1), title_text, fill=(0, 0, 0), font=font_title)
-        draw.text((tx - 1, ty + 1), title_text, fill=(0, 0, 0), font=font_title)
-        draw.text((tx + 1, ty + 1), title_text, fill=(0, 0, 0), font=font_title)
-        draw.text((tx, ty), title_text, fill=light_gold[:3], font=font_title)
-
-        draw.text((sx + 1, sy + 1), sub_text, fill=(0, 0, 0), font=font_sub)
-        draw.text((sx, sy), sub_text, fill=(218, 203, 169), font=font_sub)
-
-        mainboard_cards = [c for c in cards if c.zone == "main"]
-        commanders = [c for c in cards if getattr(c, "is_commander", False)]
-
-        num_creatures = sum(
-            c.quantity for c in mainboard_cards if "creature" in getattr(c, "type_line", "").lower()
-        )
-        num_lands = sum(
-            c.quantity for c in mainboard_cards if "land" in getattr(c, "type_line", "").lower()
-        )
-        num_instants = sum(
-            c.quantity for c in mainboard_cards if "instant" in getattr(c, "type_line", "").lower()
-        )
-        num_sorceries = sum(
-            c.quantity for c in mainboard_cards if "sorcery" in getattr(c, "type_line", "").lower()
-        )
-        num_enchantments = sum(
-            c.quantity
-            for c in mainboard_cards
-            if "enchantment" in getattr(c, "type_line", "").lower()
-        )
-
-        y_cursor = y1 + 90
-
-        is_commander_format = (deck_format.lower() in ["commander", "cedh"]) or len(commanders) > 0
-        if is_commander_format and commanders:
-            header_text = "COMANDANTE(S)" if len(commanders) > 1 else "COMANDANTE"
-            try:
-                bbox_h = draw.textbbox((0, 0), header_text, font=font_stats_header)
-                hw = bbox_h[2] - bbox_h[0]
-                hh = bbox_h[3] - bbox_h[1]
-            except AttributeError:
-                hw, hh = draw.textsize(header_text, font=font_stats_header)
-
-            hx = (w - hw) // 2
-            draw.text((hx + 1, y_cursor + 1), header_text, fill=(0, 0, 0), font=font_stats_header)
-            draw.text((hx, y_cursor), header_text, fill=light_gold[:3], font=font_stats_header)
-            y_cursor += hh + 15
-
-            for comm in commanders:
-                c_name = comm.name
-                try:
-                    bbox_n = draw.textbbox((0, 0), c_name, font=font_sub)
-                    nw = bbox_n[2] - bbox_n[0]
-                    nh = bbox_n[3] - bbox_n[1]
-                except AttributeError:
-                    nw, nh = draw.textsize(c_name, font=font_sub)
-
-                nx = (w - nw) // 2
-                draw.text((nx + 1, y_cursor + 1), c_name, fill=(0, 0, 0), font=font_sub)
-                draw.text((nx, y_cursor), c_name, fill=(255, 255, 255), font=font_sub)
-                y_cursor += nh + 10
-
-            y_cursor += 15
-            sep_w = 260
-            draw.line(
-                [(cx - sep_w // 2, y_cursor), (cx + sep_w // 2, y_cursor)],
-                fill=gold_color[:3],
-                width=2,
-            )
-            draw.polygon(
-                [(cx - 6, y_cursor), (cx, y_cursor - 6), (cx + 6, y_cursor), (cx, y_cursor + 6)],
-                fill=gold_color[:3],
-            )
-            y_cursor += 35
-
-        stats_header = "ESTADÍSTICAS DEL MAZO"
-        try:
-            bbox_sh = draw.textbbox((0, 0), stats_header, font=font_stats_header)
-            shw = bbox_sh[2] - bbox_sh[0]
-            shh = bbox_sh[3] - bbox_sh[1]
-        except AttributeError:
-            shw, shh = draw.textsize(stats_header, font=font_stats_header)
-
-        shx = (w - shw) // 2
-        draw.text((shx + 1, y_cursor + 1), stats_header, fill=(0, 0, 0), font=font_stats_header)
-        draw.text((shx, y_cursor), stats_header, fill=light_gold[:3], font=font_stats_header)
-        y_cursor += shh + 30
-
-        stats = [
-            ("Criaturas", num_creatures),
-            ("Tierras", num_lands),
-            ("Instantáneos", num_instants),
-            ("Conjuros", num_sorceries),
-            ("Encantamientos", num_enchantments),
-        ]
-
-        for label, val in stats:
-            stat_text = f"{label}: {val}"
-            try:
-                bbox_v = draw.textbbox((0, 0), stat_text, font=font_stats_val)
-                vw = bbox_v[2] - bbox_v[0]
-                vh = bbox_v[3] - bbox_v[1]
-            except AttributeError:
-                vw, vh = draw.textsize(stat_text, font=font_stats_val)
-
-            vx = (w - vw) // 2
-            draw.text((vx + 1, y_cursor + 1), stat_text, fill=(0, 0, 0), font=font_stats_val)
-            draw.text((vx, y_cursor), stat_text, fill=(240, 235, 225), font=font_stats_val)
-            y_cursor += vh + 15
-
-        y_cursor += 20
-        sep_w = 160
-        draw.line(
-            [(cx - sep_w // 2, y_cursor), (cx + sep_w // 2, y_cursor)],
-            fill=bronze_color[:3],
-            width=2,
-        )
-        draw.ellipse([cx - 4, y_cursor - 4, cx + 4, y_cursor + 4], fill=gold_color[:3])
-
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        img.save(output_path, "JPEG", quality=95)
+    _create_separator_image = staticmethod(create_separator_image)
 
     def _drain_events(self) -> None:
         try:
