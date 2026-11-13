@@ -9,7 +9,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from gui.components.card_preview_hover import CardHoverPreview, CardPreviewInfo
-from gui.paths import output_dir, work_dir
+from gui.paths import app_base_dir, output_dir, work_dir
 from gui.views.inventory_dialogs import (
     AddCardDialog,
     BatchAssignDeckDialog,
@@ -18,6 +18,7 @@ from gui.views.inventory_dialogs import (
     DeckImportOptionDialog,
     ManaBoxImportDialog,
 )
+from src.app_settings import AppSettings, load_settings
 from src.deck_importer import DeckCard, MtgUrlDeck, fetch_deck
 from src.engine.task_manager import JobResultEvent, JobStatus, TaskManager
 from src.inventory.allocation_engine import card_usage_sort_key
@@ -38,15 +39,18 @@ class InventoryView(ttk.Frame):
         inventory_service: InventoryService,
         task_manager: TaskManager,
         on_navigate: Callable[[str], None] | None = None,
+        settings: AppSettings | None = None,
         **kwargs,
     ) -> None:
         super().__init__(master, **kwargs)
         self.inventory_service = inventory_service
         self.task_manager = task_manager
         self.on_navigate = on_navigate
+        self._settings: AppSettings = (
+            settings if settings is not None else load_settings(app_base_dir())
+        )
 
         self._preview_hover = CardHoverPreview(self)
-        self._job_callbacks: dict[str, Callable[[JobResultEvent], None]] = {}
         self._poll_after_id: str | None = None
 
         # Data caches
@@ -89,8 +93,14 @@ class InventoryView(ttk.Frame):
         self._adv_filters_visible: bool = False
 
         self._build_ui()
-        self._schedule_poll()
+        if not self.task_manager.has_event_listeners:
+            self._schedule_poll()
         self.refresh_data()
+
+    @property
+    def settings(self) -> AppSettings:
+        """Return the active AppSettings instance."""
+        return self._settings
 
     def _build_ui(self) -> None:
         self.notebook = ttk.Notebook(self)
@@ -506,13 +516,6 @@ class InventoryView(ttk.Frame):
         if not mode:
             return
 
-        job = self.task_manager.submit_job(
-            f"Importar CSV ManaBox ({mode})",
-            self._task_import_manabox,
-            csv_path,
-            mode,
-        )
-
         def _on_import_done(ev: JobResultEvent) -> None:
             if ev.status == JobStatus.COMPLETED:
                 count = ev.result or 0
@@ -529,7 +532,13 @@ class InventoryView(ttk.Frame):
                     parent=self,
                 )
 
-        self._job_callbacks[job.id] = _on_import_done
+        self.task_manager.submit_job(
+            f"Importar CSV ManaBox ({mode})",
+            self._task_import_manabox,
+            csv_path,
+            mode,
+            on_result=_on_import_done,
+        )
 
     def _task_import_manabox(self, csv_path: Path, mode: str) -> int:
         return self.inventory_service.import_manabox_csv(csv_path, mode=mode)
@@ -911,12 +920,6 @@ class InventoryView(ttk.Frame):
             )
             return
 
-        job = self.task_manager.submit_job(
-            "Cargar Mazo desde URL",
-            self._task_fetch_and_register_deck,
-            url,
-        )
-
         def _on_deck_loaded(ev: JobResultEvent) -> None:
             if ev.status == JobStatus.COMPLETED:
                 deck_id = ev.result
@@ -933,7 +936,12 @@ class InventoryView(ttk.Frame):
                     parent=self,
                 )
 
-        self._job_callbacks[job.id] = _on_deck_loaded
+        self.task_manager.submit_job(
+            "Cargar Mazo desde URL",
+            self._task_fetch_and_register_deck,
+            url,
+            on_result=_on_deck_loaded,
+        )
 
     def _task_fetch_and_register_deck(self, url: str) -> int:
         fetched = fetch_deck(url)
@@ -1332,13 +1340,6 @@ class InventoryView(ttk.Frame):
             )
             return
 
-        job = self.task_manager.submit_job(
-            f"Generar PDF Proxies: {deck_rec.name}",
-            self._task_generate_missing_proxies_pdf,
-            deck_rec,
-            plan.missing_cards,
-        )
-
         def _on_pdf_completed(ev: JobResultEvent) -> None:
             if ev.status == JobStatus.COMPLETED:
                 result_paths = ev.result
@@ -1359,7 +1360,13 @@ class InventoryView(ttk.Frame):
                     parent=self,
                 )
 
-        self._job_callbacks[job.id] = _on_pdf_completed
+        self.task_manager.submit_job(
+            f"Generar PDF Proxies: {deck_rec.name}",
+            self._task_generate_missing_proxies_pdf,
+            deck_rec,
+            plan.missing_cards,
+            on_result=_on_pdf_completed,
+        )
 
     def _task_generate_missing_proxies_pdf(
         self,
@@ -1383,11 +1390,28 @@ class InventoryView(ttk.Frame):
             name=f"{deck.name}_proxies",
             format=deck.format or "commander",
         )
+        s = self._settings
+        effective_out = s.output_dir or output_dir()
+        effective_out.mkdir(parents=True, exist_ok=True)
         spec = PrintJobSpec(
             mtg_decks=[mtg_deck],
-            output_dir=output_dir(),
+            output_dir=effective_out,
             work_dir=work_dir(),
             base_name=sanitize_filename(f"{deck.name}_proxies"),
+            cut_line_color=s.cut_line_color,
+            cut_line_style=s.cut_line_style,
+            cut_line_width=s.cut_line_width,
+            cut_line_over_cards=s.cut_line_over_cards,
+            cut_line_over_fronts=s.cut_line_over_fronts,
+            cut_line_over_backs=s.cut_line_over_backs,
+            max_pdf_bytes=s.max_pdf_bytes,
+            deck_lang=s.scryfall_lang,
+            deck_quality=s.scryfall_quality,
+            deck_fail_policy=s.scryfall_fail_policy,
+            deck_quality_check=s.scryfall_quality_check,
+            deck_blur_threshold=s.scryfall_blur_threshold,
+            deck_brightness_contrast_check=s.scryfall_brightness_contrast_check,
+            deck_minimize_tokens=s.scryfall_minimize_tokens,
             cancel_event=cancel_event,
         )
         return PrintPipeline.execute(spec).pdf_paths
@@ -1440,17 +1464,9 @@ class InventoryView(ttk.Frame):
             self._poll_after_id = None
             return
 
-        events = self.task_manager.poll_events()
-        for ev in events:
-            if isinstance(ev, JobResultEvent):
-                cb = self._job_callbacks.pop(ev.job_id, None)
-                if cb:
-                    try:
-                        cb(ev)
-                    except Exception as e:
-                        _log.error("Error in inventory view job callback: %s", e)
-
-        self._schedule_poll()
+        self.task_manager.poll_events()
+        if not self.task_manager.has_event_listeners:
+            self._schedule_poll()
 
     def destroy(self) -> None:
         """Clean up preview hover tooltips and background timers."""

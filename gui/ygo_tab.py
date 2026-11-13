@@ -74,7 +74,10 @@ class YGOTabMixin:
             except Exception as exc:
                 self.events.put(("ygo_deck_error", str(exc)))
 
-        threading.Thread(target=_fetch, daemon=True).start()
+        if getattr(self, "task_manager", None) is not None:
+            self.task_manager.submit_job("Scrape Yu-Gi-Oh! Deck", _fetch)
+        else:
+            threading.Thread(target=_fetch, daemon=True).start()
 
     def _ygo_refresh_rows(self) -> None:
         for row in self._ygo_deck_rows:

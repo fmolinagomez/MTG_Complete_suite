@@ -292,23 +292,37 @@ class ValidatorView(ttk.Frame):
         else:
             threading.Thread(target=self._async_load_and_validate, args=(url,), daemon=True).start()
 
-    def _async_load_and_validate(self, url: str) -> None:
+    def _async_load_and_validate(
+        self, url: str, cancel_event: threading.Event | None = None
+    ) -> None:
         try:
+            if cancel_event is not None and cancel_event.is_set():
+                return
             deck = fetch_deck(url)
+            if cancel_event is not None and cancel_event.is_set():
+                return
             self.event_queue.put(("deck_loaded", (deck.name, deck.cards, deck.raw_json)))
 
             total_cards = len(deck.cards)
 
             def _validate_card_job(card: DeckCard, idx: int):
+                if cancel_event is not None and cancel_event.is_set():
+                    return
                 res = self._validate_single_card(card)
+                if cancel_event is not None and cancel_event.is_set():
+                    return
                 self.event_queue.put(("card_validated", (res, idx, total_cards)))
 
             from concurrent.futures import ThreadPoolExecutor
 
             with ThreadPoolExecutor(max_workers=5) as executor:
                 for idx, card in enumerate(deck.cards):
+                    if cancel_event is not None and cancel_event.is_set():
+                        break
                     executor.submit(_validate_card_job, card, idx)
 
+            if cancel_event is not None and cancel_event.is_set():
+                return
             self.event_queue.put(("validation_complete", None))
 
         except DeckImportError as exc:

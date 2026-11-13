@@ -54,6 +54,9 @@ class AppSettings:
 
 
 def _settings_path(base_dir: Path) -> Path:
+    base_dir = Path(base_dir)
+    if base_dir.suffix.lower() == ".json":
+        return base_dir
     return base_dir / "MPCFillToPDF" / "settings.json"
 
 

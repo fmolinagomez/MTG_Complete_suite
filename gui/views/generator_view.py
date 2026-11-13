@@ -33,7 +33,6 @@ from gui.views.generator_tabs import (
     LorcanaTabMixin,
     OPTabMixin,
     RBTabMixin,
-    SettingsTabMixin,
     XmlTabMixin,
     YGOTabMixin,
 )
@@ -73,7 +72,7 @@ from src.validator import ValidationWarning
 from src.ygo_scraper import YGODeck
 
 if TYPE_CHECKING:
-    from src.engine.task_manager import TaskManager
+    from src.engine.task_manager import Job, TaskManager
 
 
 @dataclass
@@ -98,7 +97,6 @@ class GeneratorView(
     LorcanaTabMixin,
     YGOTabMixin,
     LocalsTabMixin,
-    SettingsTabMixin,
 ):
     """Unified PDF generation view hosting tabs for MPC XMLs and supported TCGs."""
 
@@ -107,6 +105,7 @@ class GeneratorView(
         master: tk.Misc,
         task_manager: TaskManager | None = None,
         on_navigate: Callable[[str], None] | None = None,
+        settings: AppSettings | None = None,
         **kwargs,
     ) -> None:
         super().__init__(master, **kwargs)
@@ -126,12 +125,14 @@ class GeneratorView(
         self._front_multiselect_var = tk.BooleanVar(value=False)
         self._front_selected_indices: set[int] = set()
 
-        self._settings: AppSettings = load_settings(app_base_dir())
+        self._settings: AppSettings = (
+            settings if settings is not None else load_settings(app_base_dir())
+        )
         self._custom_output_dir: Path | None = self._settings.output_dir
         self._cut_line_skip_date: str | None = None
 
         self.events: queue.Queue = queue.Queue()
-        self.worker: threading.Thread | None = None
+        self.worker: threading.Thread | Job | None = None
         self.cancel_event = threading.Event()
         self.running = False
         self.keep_cache = tk.BooleanVar(value=False)
@@ -153,6 +154,16 @@ class GeneratorView(
         self._build_ui()
         self.after(80, self._drain_events)
         self.after(200, self._setup_dnd)
+
+    @property
+    def settings(self) -> AppSettings:
+        """Return the active AppSettings instance."""
+        return self._settings
+
+    def refresh_settings(self) -> None:
+        """Synchronize displayed output directory with the shared AppSettings."""
+        self._custom_output_dir = self._settings.output_dir
+        self.out_dir_var.set(str(self._settings.output_dir or output_dir()))
 
     def _build_ui(self) -> None:
         bottom_controls = ttk.Frame(self)
@@ -274,22 +285,6 @@ class GeneratorView(
         notebook.add(ygo_frame, **ygo_kw)
         self._build_yugioh_tab(ygo_frame)
 
-        settings_frame = ttk.Frame(notebook)
-        notebook.add(settings_frame, text=" ⚙ Configuración")
-        self._build_settings_tab(settings_frame)
-        self._settings_tab_idx = notebook.index("end") - 1
-
-        notebook.bind("<<NotebookTabChanged>>", self._on_notebook_tab_changed)
-
-    def _on_notebook_tab_changed(self, _event=None) -> None:
-        on_settings = self._game_notebook.index("current") == self._settings_tab_idx
-        if on_settings:
-            self._locals_pane.grid_remove()
-            self._game_notebook.grid_configure(columnspan=2, padx=0)
-        else:
-            self._game_notebook.grid_configure(columnspan=1, padx=(0, 4))
-            self._locals_pane.grid()
-
     def _build_scrollable_rows(self, parent: ttk.Frame):
         """Create a Canvas + inner Frame for a vertically and horizontally scrolling list of rows."""
         holder = ttk.Frame(parent, relief=tk.SUNKEN, borderwidth=1)
@@ -381,7 +376,7 @@ class GeneratorView(
             canvas.yview_scroll(int(-event.delta / 120), "units")
 
     def _effective_output_dir(self) -> Path:
-        d = self._custom_output_dir or output_dir()
+        d = self._settings.output_dir or self._custom_output_dir or output_dir()
         d.mkdir(parents=True, exist_ok=True)
         return d
 
@@ -811,7 +806,7 @@ class GeneratorView(
             self._settings.cut_line_over_cards,
             self._settings.cut_line_over_fronts,
             self._settings.cut_line_over_backs,
-            None,
+            self.cancel_event,
             ygo_decks_snapshot,
         )
 
@@ -835,6 +830,8 @@ class GeneratorView(
         ):
             return
         self.cancel_event.set()
+        if self.task_manager is not None and self.worker is not None and hasattr(self.worker, "id"):
+            self.task_manager.cancel_job(self.worker.id)
         self.stop_btn.state(["disabled"])
         self.status_var.set("Cancelando…")
 

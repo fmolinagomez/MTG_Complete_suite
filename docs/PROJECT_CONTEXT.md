@@ -21,12 +21,13 @@ GUI / CLI
 - `src/precheck.py`: análisis, planificación y manifiesto de fusiones.
 - `src/pipeline.py`: motor unificado `PrintPipeline.execute(PrintJobSpec)` y envoltorios compatibles (`run`, `run_merged`, `run_plan`, `run_locals_only`, `run_print_batch`, `run_deck_url`).
 - `src/print_batch.py`, `src/tcg_batches.py`: `CardSlot`, `PrintBatch`, `CombinedPrintRun`, adaptadores de lotes TCG, separadores y emisión de `tokens.md` sin Tkinter.
-- `src/worker_events.py`: eventos tipados del worker; la GUI los recibe por `queue.Queue`.
+- `src/engine/task_manager.py`: gestor central de tareas en segundo plano (`ThreadPoolExecutor`), enrutamiento determinista de callbacks/eventos (`JobProgressEvent`, `JobResultEvent`) y cancelación cooperativa.
+- `src/app_settings.py`: modelo unificado `AppSettings` y persistencia atómica en `MPCFillToPDF/settings.json`.
 - `src/downloader.py`: caché, Drive API/gdown, reintentos y errores tipados.
 - `src/cropper.py`: recorte MPC opcional, relleno de esquinas y sangrado espejo.
 - `src/pdf_generator.py`: cuadrícula A4 3×3, traseras espejadas por columnas, marcas y división por tamaño.
 - `src/deck_importer.py`, `src/scryfall.py`, `src/*_scraper.py`: importación de Magic, One Piece, Riftbound, Lorcana y Yu-Gi-Oh!.
-- `gui/main.py`: estado de la aplicación y trabajador en segundo plano; las pestañas son mixins en `gui/*_tab.py`.
+- `gui/app.py`, `gui/views/*`: contenedor de ventana única (`App`) con navegación compartida, instancia única de `AppSettings` y `TaskManager` inyectada en `GeneratorView`, `ValidatorView`, `InventoryView` y `SettingsView`.
 - `build_exe.py`: generación de ejecutables y recursos temporales de PyInstaller.
 
 ## Contratos que no se deben romper

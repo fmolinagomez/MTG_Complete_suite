@@ -44,9 +44,10 @@ class App:
         self.db_file = db_path()
 
         # Services & Core Engine
-        self.settings: AppSettings = load_settings(self.work_dir / "settings.json")
+        self.settings: AppSettings = load_settings(self.base_dir)
         self.inventory_service = InventoryService(self.db_file)
         self.task_manager = TaskManager(max_workers=5)
+        self.task_manager.add_event_listener(self._handle_engine_event)
 
         # UI State & Views Cache
         self.current_route: str = "hub"
@@ -133,6 +134,7 @@ class App:
                 self.container,
                 task_manager=self.task_manager,
                 on_navigate=self.navigate_to,
+                settings=self.settings,
             )
         elif route == "validator":
             view = ValidatorView(
@@ -146,13 +148,14 @@ class App:
                 inventory_service=self.inventory_service,
                 task_manager=self.task_manager,
                 on_navigate=self.navigate_to,
+                settings=self.settings,
             )
         elif route == "settings":
             view = SettingsView(
                 self.container,
                 on_navigate=self.navigate_to,
                 settings=self.settings,
-                base_dir=self.work_dir,
+                base_dir=self.base_dir,
             )
         else:
             raise ValueError(f"Ruta desconocida: {route}")
@@ -181,26 +184,28 @@ class App:
             target_view.refresh_stats()
         elif route == "inventory" and hasattr(target_view, "refresh_data"):
             target_view.refresh_data()
+        elif route == "generator" and hasattr(target_view, "refresh_settings"):
+            target_view.refresh_settings()
+
+    def _handle_engine_event(self, event: JobProgressEvent | JobResultEvent) -> None:
+        """Update global status bar and activity text from a drained TaskManager event."""
+        if isinstance(event, JobProgressEvent):
+            pct = int(event.current / event.total * 100) if event.total > 0 else 0
+            msg = f"[{event.stage}] {event.message} ({pct}%)"
+            self.status_label.config(text=msg)
+            self.nav_bar.update_activity_text(msg)
+        elif isinstance(event, JobResultEvent):
+            if event.status == JobStatus.COMPLETED:
+                self.status_label.config(text=f"Tarea completada: {event.job_id}")
+            elif event.status == JobStatus.FAILED:
+                self.status_label.config(text=f"Error en tarea {event.job_id}: {event.error}")
+            elif event.status == JobStatus.CANCELLED:
+                self.status_label.config(text=f"Tarea cancelada: {event.job_id}")
 
     def _poll_engine_events(self) -> None:
         """Poll events from the TaskManager background queue and update UI elements."""
         try:
-            events = self.task_manager.poll_events()
-            for event in events:
-                if isinstance(event, JobProgressEvent):
-                    pct = int(event.current / event.total * 100) if event.total > 0 else 0
-                    msg = f"[{event.stage}] {event.message} ({pct}%)"
-                    self.status_label.config(text=msg)
-                    self.nav_bar.update_activity_text(msg)
-                elif isinstance(event, JobResultEvent):
-                    if event.status == JobStatus.COMPLETED:
-                        self.status_label.config(text=f"Tarea completada: {event.job_id}")
-                    elif event.status == JobStatus.FAILED:
-                        self.status_label.config(
-                            text=f"Error en tarea {event.job_id}: {event.error}"
-                        )
-                    elif event.status == JobStatus.CANCELLED:
-                        self.status_label.config(text=f"Tarea cancelada: {event.job_id}")
+            self.task_manager.poll_events()
 
             # Check overall activity state for top nav bar spinner
             active_jobs = self.task_manager.get_active_jobs()

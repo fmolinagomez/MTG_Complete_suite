@@ -278,3 +278,64 @@ class TestTaskManagerErrorHandling:
 
         with pytest.raises(RuntimeError, match="Cannot submit job to a shutdown TaskManager"):
             tm.submit_job("AfterShutdown", lambda: None)
+
+    def test_on_result_and_on_progress_callbacks(self):
+        with TaskManager(max_workers=2) as tm:
+            progress_seen: list[JobProgressEvent] = []
+            results_seen: list[JobResultEvent] = []
+
+            def worker():
+                return "done-value"
+
+            job = tm.submit_job(
+                "CallbackJob",
+                worker,
+                on_result=results_seen.append,
+                on_progress=progress_seen.append,
+            )
+            tm.post_progress(job.id, "STEP", 1, 2, "Halfway")
+            job.future.result(timeout=2.0)
+
+            drained = tm.poll_events()
+            assert len(drained) == 2
+            assert len(progress_seen) == 1
+            assert progress_seen[0].message == "Halfway"
+            assert len(results_seen) == 1
+            assert results_seen[0].result == "done-value"
+
+    def test_event_listeners_and_per_job_callbacks_do_not_steal_events(self):
+        with TaskManager(max_workers=2) as tm:
+            global_events: list[JobProgressEvent | JobResultEvent] = []
+            job_results: list[JobResultEvent] = []
+
+            tm.add_event_listener(global_events.append)
+            assert tm.has_event_listeners is True
+
+            job = tm.submit_job("SharedJob", lambda: 99, on_result=job_results.append)
+            job.future.result(timeout=2.0)
+
+            tm.poll_events()
+            assert len(job_results) == 1
+            assert job_results[0].result == 99
+            assert len(global_events) == 1
+            assert isinstance(global_events[0], JobResultEvent)
+
+            tm.remove_event_listener(global_events.append)
+            assert tm.has_event_listeners is False
+
+    def test_positional_cancel_event_binding(self):
+        with TaskManager(max_workers=2) as tm:
+            caller_cancel = threading.Event()
+
+            def positional_worker(a: int, cancel_event: threading.Event | None = None, b: int = 0):
+                assert cancel_event is not None
+                return (a + b, cancel_event.is_set())
+
+            # 1. Passing caller's threading.Event positionally
+            job1 = tm.submit_job("PosEvent", positional_worker, 10, caller_cancel, 5)
+            assert job1.cancel_event is caller_cancel
+            assert job1.future.result(timeout=2.0) == (15, False)
+
+            # 2. Passing None positionally for cancel_event (should inject job.cancel_event without TypeError)
+            job2 = tm.submit_job("PosNone", positional_worker, 20, None, 7)
+            assert job2.future.result(timeout=2.0) == (27, False)

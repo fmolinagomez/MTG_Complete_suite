@@ -114,4 +114,7 @@ class GameScraperTabMixin:
             except Exception as e:
                 self.events.put((spec.error_event, str(e)))
 
-        threading.Thread(target=_fetch, daemon=True).start()
+        if getattr(self, "task_manager", None) is not None:
+            self.task_manager.submit_job(f"Scrape {spec.game_name} Deck", _fetch)
+        else:
+            threading.Thread(target=_fetch, daemon=True).start()

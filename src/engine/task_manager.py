@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import logging
 import queue
 import threading
 import time
@@ -12,6 +13,8 @@ from enum import Enum
 from typing import Any
 
 from src.cancellation import Cancelled
+
+_log = logging.getLogger(__name__)
 
 
 class JobStatus(str, Enum):
@@ -78,28 +81,74 @@ class TaskManager:
             thread_name_prefix="TaskManagerWorker",
         )
         self._jobs: dict[str, Job] = {}
+        self._result_callbacks: dict[str, Callable[[JobResultEvent], None]] = {}
+        self._progress_callbacks: dict[str, Callable[[JobProgressEvent], None]] = {}
+        self._event_listeners: list[Callable[[JobProgressEvent | JobResultEvent], None]] = []
         self._lock = threading.Lock()
         self._event_queue: queue.Queue[JobProgressEvent | JobResultEvent] = queue.Queue()
         self._is_shutdown = False
+
+    @property
+    def has_event_listeners(self) -> bool:
+        """Return True if at least one global event listener is registered."""
+        with self._lock:
+            return bool(self._event_listeners)
+
+    def add_event_listener(
+        self, listener: Callable[[JobProgressEvent | JobResultEvent], None]
+    ) -> None:
+        """Register a listener invoked for every event drained by poll_events()."""
+        with self._lock:
+            if listener not in self._event_listeners:
+                self._event_listeners.append(listener)
+
+    def remove_event_listener(
+        self, listener: Callable[[JobProgressEvent | JobResultEvent], None]
+    ) -> None:
+        """Unregister a previously added global event listener."""
+        with self._lock:
+            if listener in self._event_listeners:
+                self._event_listeners.remove(listener)
+
+    def register_callbacks(
+        self,
+        job_id: str,
+        *,
+        on_result: Callable[[JobResultEvent], None] | None = None,
+        on_progress: Callable[[JobProgressEvent], None] | None = None,
+    ) -> None:
+        """Register or update per-job completion and progress callbacks."""
+        with self._lock:
+            if on_result is not None:
+                self._result_callbacks[job_id] = on_result
+            if on_progress is not None:
+                self._progress_callbacks[job_id] = on_progress
 
     def submit_job(
         self,
         name: str,
         target: Callable[..., Any],
         *args: Any,
+        on_result: Callable[[JobResultEvent], None] | None = None,
+        on_progress: Callable[[JobProgressEvent], None] | None = None,
         **kwargs: Any,
     ) -> Job:
         """Submit a target callable for background execution.
 
-        Creates an isolated cancellation token for the job and schedules it
-        on the thread pool.
+        Creates or binds an isolated cancellation token for the job, registers
+        optional per-job callbacks, and schedules execution on the thread pool.
         """
         with self._lock:
             if self._is_shutdown:
                 raise RuntimeError("Cannot submit job to a shutdown TaskManager")
 
             job_id = uuid.uuid4().hex
+            job_args = list(args)
+            job_kwargs = dict(kwargs)
             cancel_event = threading.Event()
+
+            if isinstance(job_kwargs.get("cancel_event"), threading.Event):
+                cancel_event = job_kwargs["cancel_event"]
 
             sig = None
             try:
@@ -107,19 +156,47 @@ class TaskManager:
             except (ValueError, TypeError):
                 pass
 
-            job_kwargs = dict(kwargs)
-            if (
-                sig is not None
-                and "cancel_event" in sig.parameters
-                and "cancel_event" not in job_kwargs
-            ):
-                job_kwargs["cancel_event"] = cancel_event
+            if sig is not None and "cancel_event" in sig.parameters:
+                try:
+                    bound = sig.bind_partial(*job_args, **job_kwargs)
+                    if "cancel_event" in bound.arguments:
+                        existing = bound.arguments["cancel_event"]
+                        if isinstance(existing, threading.Event):
+                            cancel_event = existing
+                        else:
+                            pos_params = [
+                                p.name
+                                for p in sig.parameters.values()
+                                if p.kind
+                                in (
+                                    inspect.Parameter.POSITIONAL_ONLY,
+                                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                                )
+                            ]
+                            if "cancel_event" in pos_params:
+                                idx = pos_params.index("cancel_event")
+                                if idx < len(job_args):
+                                    job_args[idx] = cancel_event
+                                else:
+                                    job_kwargs["cancel_event"] = cancel_event
+                            else:
+                                job_kwargs["cancel_event"] = cancel_event
+                    else:
+                        job_kwargs["cancel_event"] = cancel_event
+                except TypeError:
+                    if "cancel_event" not in job_kwargs:
+                        job_kwargs["cancel_event"] = cancel_event
+
+            if on_result is not None:
+                self._result_callbacks[job_id] = on_result
+            if on_progress is not None:
+                self._progress_callbacks[job_id] = on_progress
 
             job = Job(
                 id=job_id,
                 name=name,
                 callable=target,
-                args=args,
+                args=tuple(job_args),
                 kwargs=job_kwargs,
                 cancel_event=cancel_event,
                 status=JobStatus.PENDING,
@@ -214,7 +291,7 @@ class TaskManager:
         )
 
     def poll_events(self) -> list[JobProgressEvent | JobResultEvent]:
-        """Drain and return all queued progress and result events without blocking."""
+        """Drain queued events, dispatch registered job/global callbacks, and return events."""
         events: list[JobProgressEvent | JobResultEvent] = []
         while True:
             try:
@@ -222,6 +299,38 @@ class TaskManager:
                 events.append(event)
             except queue.Empty:
                 break
+
+        if not events:
+            return events
+
+        with self._lock:
+            listeners = list(self._event_listeners)
+
+        for event in events:
+            if isinstance(event, JobProgressEvent):
+                with self._lock:
+                    progress_cb = self._progress_callbacks.get(event.job_id)
+                if progress_cb is not None:
+                    try:
+                        progress_cb(event)
+                    except Exception as exc:
+                        _log.error("Error in job progress callback (%s): %s", event.job_id, exc)
+            elif isinstance(event, JobResultEvent):
+                with self._lock:
+                    result_cb = self._result_callbacks.pop(event.job_id, None)
+                    self._progress_callbacks.pop(event.job_id, None)
+                if result_cb is not None:
+                    try:
+                        result_cb(event)
+                    except Exception as exc:
+                        _log.error("Error in job result callback (%s): %s", event.job_id, exc)
+
+            for listener in listeners:
+                try:
+                    listener(event)
+                except Exception as exc:
+                    _log.error("Error in TaskManager event listener: %s", exc)
+
         return events
 
     def get_job(self, job_id: str) -> Job | None:
